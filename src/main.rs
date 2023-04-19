@@ -1,5 +1,8 @@
-use kube::{Client, api::{Api, ListParams, ResourceExt}};
-use k8s_openapi::api::core::v1::{Pod, Service};
+use kube::{Client, Error, api::{Api, ListParams, ResourceExt}, runtime::{watcher::Config, controller::Action}};
+use k8s_openapi::{api::core::v1::{Pod, Service}};
+use std::{sync::Arc, time::Duration};
+use kube::runtime::{Controller};
+use futures::StreamExt;
 
 async fn query_pods(client:Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
     
@@ -20,6 +23,21 @@ async fn query_services(client:Client, ns: &str) -> Result<(), Box<dyn std::erro
     return Ok(())
 }
 
+struct Context {
+    client: Client,
+}
+async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
+    
+        
+    
+    Ok(Action::await_change())
+}
+
+fn error_policy(svc:Arc<Service>, err: &Error ,ctx:Arc<Context>) -> Action {
+
+    Action::requeue(Duration::from_secs(5))
+}
+
 #[tokio::main]
 async fn main()  -> Result<(), Box<dyn std::error::Error>> {
     
@@ -29,10 +47,22 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
     //Namespace where it will be looked
     let ns = "linkerd".to_string();
 
-    query_pods(client.clone(), &ns).await.unwrap();
+    // query_pods(client.clone(), &ns).await.unwrap();
     
-    query_services(client.clone(), &ns).await.unwrap();
+    // query_services(client.clone(), &ns).await.unwrap();
+
+    let linkerd_svc: Api<Service> = Api::all(client.clone());
+
+    let context: Arc<Context> = Arc::new(Context { client: client.clone() });
+
+    Controller::new(linkerd_svc.clone(), Config::default().labels("app=cockroachdb"))
+    .run(reconciler, error_policy, context)
+    .for_each(|reconciliation_result| async move {
+        match reconciliation_result {
+            Ok(linkerd_svc_resource) => println!("Received the resource : {:?}", linkerd_svc_resource),
+            Err(err) => println!("Received error in reconcilation : {}", err),
+        }
+    }).await;
 
     Ok(())
-    
 }
