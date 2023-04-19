@@ -28,7 +28,9 @@ struct Context {
 }
 async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
     
-        
+    if let Some(ts) = &svc.metadata.deletion_timestamp {
+        println!("Service : {} being delete in time : {:?}", svc.name_any(), &ts);
+    }
     
     Ok(Action::await_change())
 }
