@@ -1,10 +1,10 @@
 use kube::{Client, Error, api::{Api, ListParams, ResourceExt}, runtime::{watcher::Config, controller::Action}};
-use k8s_openapi::{api::core::v1::{Pod, Service}};
+use k8s_openapi::{api::{core::v1::{Pod, Service, Endpoints}, discovery::v1::{Endpoint, EndpointSlice}}, List};
 use std::{sync::Arc, time::Duration};
 use kube::runtime::{Controller};
 use futures::StreamExt;
 
-async fn query_pods(client:Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn _query_pods(client:Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
     
     //Query the pods
     let pods: Api<Pod> = Api::namespaced(client, ns);
@@ -14,7 +14,7 @@ async fn query_pods(client:Client, ns: &str) -> Result<(), Box<dyn std::error::E
     return Ok(())
 }
 
-async fn query_services(client:Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> { 
+async fn _query_services(client:Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> { 
     //Query the services
     let service: Api<Service> = Api::namespaced(client, ns);
     for svc in service.list(&ListParams::default()).await?{
@@ -30,6 +30,36 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
     
     if let Some(ts) = &svc.metadata.deletion_timestamp {
         println!("Service : {} being delete in time : {:?}", svc.name_any(), &ts);
+        //remove finalizers and return from here
+    }
+
+    /*
+        - Get the endpoint slices 
+    */
+
+    let ep_slices: Api<Endpoints> = Api::all(ctx.client.clone());
+
+    let svc_name = svc.name_any();
+    let ep_slice_name = format!("app={svc_name}");
+    
+    // println!("Endpoint slice name : {}", ep_slice_name);
+
+    // let ep_filter = ListParams::default().fields(&ep_slice_name);
+
+    for ep in ep_slices.list(&ListParams::default().labels(&ep_slice_name)).await?{
+        println!("Endpoints for thed Endpoint Slice : {:?} ", ep.name_any());
+        for sub in ep.subsets.iter() {
+            for addr in sub.iter() {
+                // println!("Host : {:?}", addr);
+                for host in addr.addresses.iter() {
+                    for epa in host.iter() {
+                        println!("Addresses: {:?}, hostname: {:?}", epa.ip, epa.hostname);
+                    }
+                }
+            }
+            
+        }
+        println!("----------------------------")
     }
     
     Ok(Action::await_change())
@@ -47,11 +77,17 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::try_default().await.unwrap();
     
     //Namespace where it will be looked
-    let ns = "linkerd".to_string();
+    // let ns = "linkerd".to_string();
 
     // query_pods(client.clone(), &ns).await.unwrap();
     
     // query_services(client.clone(), &ns).await.unwrap();
+
+    // let linkerd_svc: Api<Endpoints> = Api::all(client.clone());
+    // for ep in linkerd_svc.list(&ListParams::default()).await? {
+    //     println!("Ep for all : {}", ep.name_any());
+    // }
+
 
     let linkerd_svc: Api<Service> = Api::all(client.clone());
 
