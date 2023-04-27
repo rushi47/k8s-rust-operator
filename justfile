@@ -1,6 +1,6 @@
 #Rust fmt and linter together
 fl: fmt lint
-setup_cluster: create_k3d_cluster install_linkerd link_clusters
+setup_cluster: create_k3d_cluster
 
 _cargo := "cargo"
 _default := ""
@@ -19,11 +19,11 @@ run:
    {{ _cargo }} run
 
 #create k3d cluster east and west
-create_k3d_cluster:
+create_k3d_cluster: && install_linkerd
    cd utils && ./create_k3d.sh
 
 #install linkerd and install multicluster extension
-install_linkerd:
+install_linkerd: && link_clusters
    cd utils &&  ./install_linkerd.sh
 
 #link created two multiclusters
