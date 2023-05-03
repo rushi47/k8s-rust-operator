@@ -1,3 +1,7 @@
+#default recipe
+default:
+  just --list
+
 #Rust fmt and linter together
 fl: fmt lint
 setup_cluster: create_k3d_cluster
