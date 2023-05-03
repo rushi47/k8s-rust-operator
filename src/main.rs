@@ -1,18 +1,19 @@
 use futures::StreamExt;
 use k8s_openapi::{
     api::{
-        core::v1::{Endpoints, Pod, Service, ServiceSpec, ServicePort},
+        core::v1::{Endpoints, Pod, Service, ServicePort, ServiceSpec},
         discovery::v1::{Endpoint, EndpointSlice},
     },
     List,
 };
 use kube::{
-    api::{Api, ListParams, ResourceExt},
+    api::{Api, ListParams, PostParams, ResourceExt},
+    core::ObjectMeta,
     runtime::{controller::Action, watcher::Config},
-    Client, Error, core::ObjectMeta,
+    Client, Error,
 };
 use kube::{core::ObjectList, runtime::Controller};
-use std::{sync::Arc, time::Duration, collections::{HashMap, BTreeMap}};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 async fn _query_pods(client: Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
     /*
@@ -53,42 +54,49 @@ pub struct Context {
     client: Client,
 }
 
-
-async fn create_global_svc(svc: Arc<Service>, ctx: Arc<Context>, svc_name: &str, ns: &str) -> Result<(), Error> {
+async fn create_global_svc(
+    ctx: Arc<Context>,
+    svc_name: String,
+    ns: String,
+    svc_port: Vec<ServicePort>,
+) -> Result<(), Error> {
     /*
-        - Create the global Service if it doesnt exist
-        - Get the EndpointSlices from other Services
-        - Add those EndpointSlices as backing to global Service.
-     */
+       - Create the global Service if it doesnt exist
+       - Get the EndpointSlices from other Services
+       - Add those EndpointSlices as backing to global Service.
+    */
 
-    /*
-    let labels: BTreeMap<String, String> = BTreeMap::new();
+    let mut labels: BTreeMap<String, String> = BTreeMap::new();
     labels.insert("linkerd.io/service-mirror".to_string(), "true".to_string());
     labels.insert("linkerd.io/global-mirror".to_string(), "true".to_string());
 
-
-    let svc_meta: ObjectMeta = ObjectMeta { 
-        labels: Some(labels), 
-         name: Some(format!("{svc_name}-svc-global")), 
+    let svc_meta: ObjectMeta = ObjectMeta {
+        labels: Some(labels.clone()),
+        name: Some(format!("{svc_name}-svc-global")),
         namespace: Some(ns.to_string()),
         ..ObjectMeta::default()
     };
-    
-    //get this service ports from other services
-    let svc_port: ServicePort = ServicePort { app_protocol: (), name: (), node_port: (), port: (), protocol: (), target_port: () }
-    
-    let svc_spec: ServiceSpec = ServiceSpec { 
-        cluster_ip: None, 
+
+    let svc_spec: ServiceSpec = ServiceSpec {
+        cluster_ip: Some("None".to_string()),
         ports: Some(svc_port),
-     };
-    
-    let ServiceToCreate: Service = Service { 
-        metadata: svc_meta, 
+        selector: Some(labels.clone()),
+        ..Default::default()
+    };
+
+    let ServiceToCreate: Service = Service {
+        metadata: svc_meta,
         spec: Some(svc_spec),
         ..Service::default()
     };
 
-     */
+    //create service
+    let svc: Api<Service> = Api::namespaced(ctx.client.clone(), &ns);
+
+    match svc.create(&PostParams::default(), &ServiceToCreate).await {
+        Ok(tmp) => println!("Created the service : {}", tmp.name_any()),
+        Err(e) => println!("Failed creating service : {}", e),
+    }
     Ok(())
 }
 
@@ -113,8 +121,7 @@ async fn check_if_aggregation_service_exists(
     return svc.list(&svc_filter).await.unwrap();
 }
 
-async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<Vec<ServicePort>>, Error> {
-
+async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<ServicePort>, Error> {
     println!("Listing the service port : {}", svc.name_any());
 
     let services: Api<Service> = Api::all(ctx.client.clone());
@@ -123,25 +130,27 @@ async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<Vec<S
 
     let svc_filter = ListParams::default().labels(&svc_name);
 
-    let mut service_ports :Vec<Vec<ServicePort>> = Vec::new();
-    
-    for svc in services.list(&svc_filter).await?{
+    let mut service_ports: Vec<ServicePort> = Vec::new();
+
+    for svc in services.list(&svc_filter).await? {
         println!("Name of the servcice : {:?} ", svc.name_any());
-        for svc_spec in svc.spec.iter(){
+        for svc_spec in svc.spec.iter() {
             let vec_port = svc_spec.ports.clone();
             match vec_port {
-                Some(ports) =>{
+                Some(ports) => {
                     //Check if already the same object exist (not full fledge solution to check dedup)
-                     if !service_ports.contains(&ports){ service_ports.push(ports)}
-                },
+                    for svc_port in ports.iter() {
+                        if !service_ports.contains(svc_port) {
+                            service_ports.push(svc_port.clone());
+                        }
+                    }
+                }
                 _ => println!("No service port found"),
             }
         }
-        
     }
 
-    return Ok(service_ports)
-
+    return Ok(service_ports);
 }
 async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<(), Error> {
     /*
@@ -175,18 +184,17 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
     /*
     Step 1: Create the global / aggregation service, which has backing from respective ordinal services.
         - Reconcile for the svc received, i.e its being watched on.
-        
+
         - Check if the global/Aggregation svc for the respective services exists
-        
+
         - If the aggregation svc exist :
             Check if the ports, endpointslices of the SVC for which this reconciler has been called
             are added to global/aggregation svc.
                 - handle duplicates
                 - handle add or remove
-    
+
     */
-    
-    
+
     if let Some(ts) = &svc.metadata.deletion_timestamp {
         println!(
             "Service : {} being delete in time : {:?}",
@@ -204,8 +212,22 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
 
     let check_if_svc_exists = check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await;
 
-    if check_if_svc_exists.items.len() > 0 {
+    println!(
+        "Checking if aggregation svc exists {}",
+        check_if_svc_exists.items.len()
+    );
+    if !check_if_svc_exists.items.len() > 0 {
         println!("Create the global svc");
+
+        let namespace: String = match svc.namespace() {
+            Some(ns) => ns,
+            None => "".to_string(),
+        };
+        if svc_ports.len() > 1 {
+            create_global_svc(ctx, svc.name_any(), namespace, svc_ports)
+                .await
+                .unwrap();
+        }
     }
 
     Ok(Action::await_change())
