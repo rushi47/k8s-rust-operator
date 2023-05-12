@@ -2,11 +2,6 @@
 default:
   just --list
 
-#Rust fmt and linter together
-fl: fmt lint
-setup_cluster: create_k3d_cluster
-
-_cargo := "cargo"
 _default := ""
 _default_all := "--all"
 
@@ -17,10 +12,6 @@ fmt:
 #lint all the code, takes --all as param value for fix, default to doesnt fix
 lint clipy_args=_default:
    {{ _cargo }} clipy {{ clipy_args }}
-
-#run controller
-run:
-   {{ _cargo }} run
 
 #create k3d cluster east and west
 create_k3d_cluster: && install_linkerd
@@ -33,3 +24,14 @@ install_linkerd: && link_clusters
 #link created two multiclusters
 link_clusters:
    cd utils && ./link_multilclusters.sh
+
+export K3D_ORG_DOMAIN = env_var_or_default("K3D_ORG_DOMAIN", "cluster.local")
+export K3D_NETWORK_NAME = env_var_or_default("K3D_NETWORK_NAME")
+export K3D_CLUSTER_NAME = env_var_or_default("K3D_CLUSTER_NAME")
+k3d-create:
+  k3d cluster create {{ K3D_CLUSTER_NAME }} \
+        --network='{{ K3D_NETWORK_NAME }}' \
+        --k3s-arg="--cluster-domain={{ K3D_ORG_DOMAIN }}@server:0"
+        {{ _k3d-flags }} \
+        --kubeconfig-update-default \
+        --kubeconfig-switch-context=false

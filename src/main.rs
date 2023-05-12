@@ -15,9 +15,9 @@ use kube::{
 use kube::{core::ObjectList, runtime::Controller};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-async fn _query_pods(client: Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn _query_pods(client: Client, ns: &str) -> anyhow::Result<()> {
     /*
-        //Namespace where it will be looked
+        // Namespace where it will be looked
          let ns = "linkerd".to_string();
 
          query_pods(client.clone(), &ns).await.unwrap();
@@ -29,37 +29,37 @@ async fn _query_pods(client: Client, ns: &str) -> Result<(), Box<dyn std::error:
              println!("Ep for all : {}", ep.name_any());
          }
     */
-    //Query the pods
-    let pods: Api<Pod> = Api::namespaced(client, ns);
+    // Query the pods
+    let pods = Api::<Pod>::namespaced(client, ns);
     for p in pods.list(&ListParams::default()).await? {
-        println!("Pod from the {} namespace : {:?}", ns, p.name_any());
+        // Pod IDs typically follow a <namespace>/<name> format
+        println!("Pod {}/{}", ns, p.name_any());
     }
-    return Ok(());
+
+    // Implicit return
+    Ok(())
 }
 
 async fn _query_services(client: Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
-    //Query the services
-    let service: Api<Service> = Api::namespaced(client, ns);
+    // Query the services
+    let service = Api::<Service>::namespaced(client, ns);
     for svc in service.list(&ListParams::default()).await? {
-        println!(
-            "Service name from the {} namespace : {:?}",
-            ns,
-            svc.name_any()
-        );
+        // Can also format like this if you think it's more readable
+        println!("Service {ns}/{}", svc.name_any());
     }
-    return Ok(());
+    Ok(())
 }
 
-pub struct Context {
-    client: Client,
-}
+// Should always try to derive this at least
+#[derive(Clone)]
+pub struct Context(Client);
 
 async fn create_global_svc(
     ctx: Arc<Context>,
     svc_name: String,
     ns: String,
     svc_port: Vec<ServicePort>,
-) -> Result<(), Error> {
+) -> anyhow::Result<()> {
     /*
        - Create the global Service if it doesnt exist
        - Get the EndpointSlices from other Services
@@ -70,33 +70,36 @@ async fn create_global_svc(
     labels.insert("linkerd.io/service-mirror".to_string(), "true".to_string());
     labels.insert("linkerd.io/global-mirror".to_string(), "true".to_string());
 
-    let svc_meta: ObjectMeta = ObjectMeta {
+    let svc_meta = ObjectMeta {
         labels: Some(labels.clone()),
         name: Some(format!("{svc_name}-svc-global")),
         namespace: Some(ns.to_string()),
         ..ObjectMeta::default()
     };
 
-    let svc_spec: ServiceSpec = ServiceSpec {
+    let svc_spec = ServiceSpec {
         cluster_ip: Some("None".to_string()),
         ports: Some(svc_port),
         selector: Some(labels.clone()),
         ..Default::default()
     };
 
-    let ServiceToCreate: Service = Service {
+    let service_to_create = Service {
         metadata: svc_meta,
         spec: Some(svc_spec),
         ..Service::default()
     };
 
-    //create service
-    let svc: Api<Service> = Api::namespaced(ctx.client.clone(), &ns);
+    // create service
+    let svc: Api<Service> = Api::namespaced(ctx.0.clone(), &ns);
 
-    match svc.create(&PostParams::default(), &ServiceToCreate).await {
+    // Why handle this here instead of bubbling up?
+    match svc.create(&PostParams::default(), &service_to_create).await {
         Ok(tmp) => println!("Created the service : {}", tmp.name_any()),
         Err(e) => println!("Failed creating service : {}", e),
     }
+
+    // Why do we return a result if we only return Ok?
     Ok(())
 }
 
@@ -111,7 +114,7 @@ async fn check_if_aggregation_service_exists(
 
     let name_svc = "cockroach-db-global".to_string();
 
-    let svc: Api<Service> = Api::all(ctx.client.clone());
+    let svc: Api<Service> = Api::all(ctx.0.clone());
 
     let label_filter = format!("app={name_svc}");
 
@@ -124,7 +127,7 @@ async fn check_if_aggregation_service_exists(
 async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<ServicePort>, Error> {
     println!("Listing the service port : {}", svc.name_any());
 
-    let services: Api<Service> = Api::all(ctx.client.clone());
+    let services: Api<Service> = Api::all(ctx.0.clone());
 
     let svc_name = format!("app={}", svc.name_any());
 
@@ -157,7 +160,7 @@ async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<(), Erro
         - Try querying or simply listing all the endpoints for the service
         -  Filter the EndpointSlice on the name of Service Passed
     */
-    let ep_slices: Api<Endpoints> = Api::all(ctx.client.clone());
+    let ep_slices: Api<Endpoints> = Api::all(ctx.0.clone());
 
     let svc_name = svc.name_any();
     let ep_slice_name = format!("app={svc_name}");
@@ -238,15 +241,15 @@ fn error_policy(svc: Arc<Service>, err: &Error, ctx: Arc<Context>) -> Action {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    //Create the client
-    let client = Client::try_default().await.unwrap();
+async fn main() {
+    // Create the client
+    let client = Client::try_default()
+        .await
+        .expect("Failed to create client from env defaults");
 
-    let linkerd_svc: Api<Service> = Api::all(client.clone());
+    let linkerd_svc = Api::all(client.clone());
 
-    let context: Arc<Context> = Arc::new(Context {
-        client: client.clone(),
-    });
+    let context: Arc<Context> = Arc::new(Context(client.clone()));
 
     Controller::new(
         linkerd_svc.clone(),
@@ -262,6 +265,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     })
     .await;
-
-    Ok(())
 }
