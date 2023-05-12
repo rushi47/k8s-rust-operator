@@ -1,19 +1,16 @@
-use futures::{join, StreamExt};
+use futures::{StreamExt};
 use k8s_openapi::{
     api::{
-        core::v1::{EndpointAddress, Endpoints, Pod, Service, ServicePort, ServiceSpec},
-        discovery::v1::{Endpoint, EndpointSlice},
+        core::v1::{EndpointAddress, Service},
     },
-    List,
 };
 use kube::{
-    api::{Api, ListParams, PostParams, ResourceExt},
-    core::ObjectMeta,
+    api::{Api, ResourceExt},
     runtime::{controller::Action, watcher::Config},
     Client, Error,
 };
-use kube::{core::ObjectList, runtime::Controller};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use kube::{runtime::Controller};
+use std::{sync::Arc, time::Duration};
 
 mod util;
 use crate::util::{create_global_svc, check_if_aggregation_service_exists, list_endpoints, list_svc_port};
@@ -52,20 +49,18 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
             None => "".to_string(),
         };
 
-        println!("Creating global service with name : [X] {}", global_svc_name);
-
-        let global_svc =  create_global_svc(ctx.clone(), global_svc_name, namespace, svc_ports).await.expect("Issue creating global service");
+        let _global_svc =  create_global_svc(ctx.clone(), global_svc_name, namespace, svc_ports).await.expect("Issue creating global service");
     
     }
 
-    let svc_ep: Vec<EndpointAddress> = list_endpoints(svc.clone(), ctx.clone()).await?;
+    let _svc_ep: Vec<EndpointAddress> = list_endpoints(svc.clone(), ctx.clone()).await?;
 
 
 
     Ok(Action::await_change())
 }
 
-fn error_policy(svc: Arc<Service>, err: &Error, ctx: Arc<Context>) -> Action {
+fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action {
     Action::requeue(Duration::from_secs(5))
 }
 
@@ -87,7 +82,7 @@ async fn main() {
     .run(reconciler, error_policy, context)
     .for_each(|reconciliation_result| async move {
         match reconciliation_result {
-            Ok(linkerd_svc_resource) => {
+            Ok(_linkerd_svc_resource) => {
                 // println!("Received the resource : {:?}", linkerd_svc_resource)
             }
             Err(err) => println!("Received error in reconcilation : {}", err),
