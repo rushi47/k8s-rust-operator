@@ -1,7 +1,7 @@
-use futures::StreamExt;
+use futures::{StreamExt, join};
 use k8s_openapi::{
     api::{
-        core::v1::{Endpoints, Pod, Service, ServicePort, ServiceSpec},
+        core::v1::{Endpoints, Pod, Service, ServicePort, ServiceSpec, EndpointAddress},
         discovery::v1::{Endpoint, EndpointSlice},
     },
     List,
@@ -109,19 +109,47 @@ async fn check_if_aggregation_service_exists(
     ctx: Arc<Context>,
 ) -> ObjectList<Service> {
     /*
-        - Simply check if the service named with suffix or the name decided exists, if list isnt empty it exists.
+        - Check if the label has key : mirror.linkerd.io/headless-mirror-svc-name
+            - if yes it means that this is child service of parent service - mirror.linkerd.io/headless-mirror-svc-name
+            else it means that this service is the parent service and it has childs
+        
+        - If global service doesnt exist i.e service sufix with '-global' for value of key : mirror.linkerd.io/headless-mirror-svc-name
+        Make sure there should be only service
+        
     */
 
-    let name_svc = "cockroach-db-global".to_string();
+    
+    // Key which will be looked inside label
+    let label_key = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
+
+    let mut parent_svc_name = String::new();
+    
+    // Check if the key exist inside labels
+    if svc.labels().contains_key(&label_key) {
+        match svc.labels().get(&label_key) {
+            Some(parent_name) => parent_svc_name = parent_name.to_string(),
+            _ => println!("Unable to get the parent name of service : {}", label_key),
+        }
+    } else {
+        // If key doesnt exist inside label, that means name of the service is the current service
+        parent_svc_name = svc.name_any();
+    }   
+
+
+    //Build up global service name
+    let global_svc_name = format!("{parent_svc_name}-global");
+
+    println!("Checking if the global service named : {global_svc_name} exists");
 
     let svc: Api<Service> = Api::all(ctx.0.clone());
 
-    let label_filter = format!("app={name_svc}");
+    let label_filter = format!("metadata.name={global_svc_name}");
 
-    let svc_filter = ListParams::default().labels(&label_filter);
+    let svc_filter = ListParams::default().fields(&label_filter);
 
     //check if it has any service named this global.
     return svc.list(&svc_filter).await.unwrap();
+
 }
 
 async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<ServicePort>, Error> {
@@ -129,9 +157,9 @@ async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<Servi
 
     let services: Api<Service> = Api::all(ctx.0.clone());
 
-    let svc_name = format!("app={}", svc.name_any());
+    let svc_name = format!("metadata.name={}", svc.name_any());
 
-    let svc_filter = ListParams::default().labels(&svc_name);
+    let svc_filter = ListParams::default().fields(&svc_name);
 
     let mut service_ports: Vec<ServicePort> = Vec::new();
 
@@ -153,19 +181,22 @@ async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<Servi
         }
     }
 
-    return Ok(service_ports);
+    Ok(service_ports)
+
 }
-async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<(), Error> {
+async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<EndpointAddress>, Error> {
     /*
         - Try querying or simply listing all the endpoints for the service
         -  Filter the EndpointSlice on the name of Service Passed
     */
     let ep_slices: Api<Endpoints> = Api::all(ctx.0.clone());
 
-    let svc_name = svc.name_any();
-    let ep_slice_name = format!("app={svc_name}");
+    let mut ep_address: Vec<EndpointAddress> = Vec::new();
 
-    let ep_filter = ListParams::default().labels(&ep_slice_name);
+    let svc_name = svc.name_any();
+    let ep_slice_name = format!("metadata.name={svc_name}");
+    let ep_filter = ListParams::default().fields(&ep_slice_name);
+
     for ep in ep_slices.list(&ep_filter).await? {
         println!("Endpoints for the Endpoint Slice : {:?} ", ep.name_any());
         for sub in ep.subsets.iter() {
@@ -174,13 +205,17 @@ async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<(), Erro
                 for host in addr.addresses.iter() {
                     for epa in host.iter() {
                         println!("Addresses: {:?}, hostname: {:?}", epa.ip, epa.hostname);
+                        if !(ep_address.contains(epa)) {
+                            ep_address.push(epa.clone());
+                        }
                     }
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(ep_address)
+
 }
 
 async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
@@ -209,24 +244,30 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
 
     let svc_ports = list_svc_port(svc.clone(), ctx.clone()).await?;
 
-    println!("Received the svc ports : {:?}", svc_ports);
+    println!("Received the svc ports : {:?}", svc_ports.len());
 
-    list_endpoints(svc.clone(), ctx.clone()).await?;
+    let svc_ep: Vec<EndpointAddress> = list_endpoints(svc.clone(), ctx.clone()).await?;
+
+    println!("Recevied the EndpointAddresses : {:?}", svc_ep.len());
 
     let check_if_svc_exists = check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await;
+
 
     println!(
         "Checking if aggregation svc exists {}",
         check_if_svc_exists.items.len()
     );
+    
+
     if !check_if_svc_exists.items.len() > 0 {
-        println!("Create the global svc");
+        println!("Global service doesnt exist");
 
         let namespace: String = match svc.namespace() {
             Some(ns) => ns,
             None => "".to_string(),
         };
-        if svc_ports.len() > 1 {
+        if svc_ports.len() > 0 {
+            println!("Creating global svc");
             create_global_svc(ctx, svc.name_any(), namespace, svc_ports)
                 .await
                 .unwrap();
@@ -253,13 +294,13 @@ async fn main() {
 
     Controller::new(
         linkerd_svc.clone(),
-        Config::default().labels("app=cockroachdb"),
+        Config::default().labels("mirror.linkerd.io/mirrored-service=true"),
     )
     .run(reconciler, error_policy, context)
     .for_each(|reconciliation_result| async move {
         match reconciliation_result {
             Ok(linkerd_svc_resource) => {
-                println!("Received the resource : {:?}", linkerd_svc_resource)
+                // println!("Received the resource : {:?}", linkerd_svc_resource)
             }
             Err(err) => println!("Received error in reconcilation : {}", err),
         }
