@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{EndpointAddress, Service};
+use k8s_openapi::api::core::v1::Service;
 use kube::runtime::Controller;
 use kube::{
     api::{Api, ResourceExt},
@@ -9,9 +9,8 @@ use kube::{
 use std::{sync::Arc, time::Duration};
 
 mod util;
-use crate::util::{
-    check_if_aggregation_service_exists, get_parent_name, list_endpoints, list_svc_port,
-};
+use crate::global_mirror::endpoints::create_ep_slice;
+use crate::util::{check_if_aggregation_service_exists, get_parent_name};
 
 mod global_mirror;
 use global_mirror::service::create_global_svc;
@@ -24,7 +23,7 @@ pub struct Context(Client);
 
 async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
     /*
-    * Create the global / aggregation service, which has backing from respective ordinal services.
+        * Create the global / aggregation service, which has backing from respective ordinal services.
         - Reconcile for the svc received, i.e its being watched on.
         - Check if the global/Aggregation svc for the respective services exists
         - If the aggregation svc doexnt exist, create it
@@ -34,25 +33,22 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
                 - handle add or remove
     */
 
+    //[Optional Optimisation] Only reconcile for headless service, as we can get all the information from headless service itself.
+    //Dont reconcile for it individual sets.
+    let label_key_svc_name = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
+    if svc.labels().contains_key(&label_key_svc_name) {
+        return Ok(Action::await_change());
+    }
+
     //Check if the aggregation service exists
     let (if_svc_exists, global_svc_name) =
         match check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await {
             Ok((if_svc_exists, global_svc_name)) => (if_svc_exists, global_svc_name),
             Err(e) => {
-                eprintln!("Unable to check if aggregation service exist : {}", e);
+                println!("{:?}", e);
                 return Ok(Action::requeue(REQUE_DURATION));
             }
         };
-
-    //Query the ports associated with this service.
-    let svc_ports = match list_svc_port(svc.clone(), ctx.clone()).await {
-        Ok(svc_ports) => svc_ports,
-        Err(e) => {
-            //If the is issue in listing ports back out of the function, dont do anything.
-            eprintln!("Issue in listing service ports : {}", e);
-            return Ok(Action::requeue(REQUE_DURATION));
-        }
-    };
 
     //If Service doesn't exist create it.
     if !if_svc_exists {
@@ -62,9 +58,7 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
         };
 
         let _global_svc =
-            match create_global_svc(ctx.clone(), global_svc_name.clone(), namespace, svc_ports)
-                .await
-            {
+            match create_global_svc(ctx.clone(), &svc, global_svc_name.clone(), namespace).await {
                 Ok(global_svc) => {
                     println!(
                         "Global service created succesfully with name : {}",
@@ -80,7 +74,8 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
     }
 
     //Get the headless service name of mirrored target service to directly get the Endpoint
-    let headless_svc = match get_parent_name(svc.clone()).await {
+    //TO DO: if we keep check of only allowing target headless service, we can remove this.
+    let _headless_svc = match get_parent_name(svc.clone()).await {
         Ok(svc_name) => svc_name,
         Err(e) => {
             eprintln!("Unable to get the parent service name : {}", e);
@@ -88,14 +83,17 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
         }
     };
 
-    //Create the EndpointSlice
-    let _svc_ep: Vec<EndpointAddress> = match list_endpoints(headless_svc, ctx.clone()).await {
-        Ok(svc_ep) => svc_ep,
+    //Create the EndpointSlice.
+    //TO DO: If first check is removed of allowing only headless service then headless_svc need to retrieved for second param.
+    let endpoint_slice = match create_ep_slice(ctx.clone(), &svc, global_svc_name).await {
+        Ok(eps) => eps,
         Err(e) => {
-            eprintln!("Issue in listing endpoints : {}", e);
+            println!("{:?}", e);
             return Ok(Action::requeue(REQUE_DURATION));
         }
     };
+
+    println!("EndpointSlice is created : {:?}", endpoint_slice.name_any());
 
     Ok(Action::await_change())
 }
