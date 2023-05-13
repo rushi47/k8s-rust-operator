@@ -50,15 +50,31 @@ pub async fn get_endpoint_slice(
 pub fn list_endpoints(
     _ctx: Arc<Context>,
     endpoints_list: &ObjectList<EndpointSlice>,
+    cluster_name: String,
 ) -> Vec<Endpoint> {
     /*
         - Get all the subset of addresses for this service.
+        - Modify hostname to include cluster name at the end
     */
     let mut ep_address: Vec<Endpoint> = Vec::new();
     for eps in endpoints_list.iter() {
         for ep in eps.endpoints.iter() {
             // println!("Endpoint for the Endpoint Slice : {:?} ", ep);
-            ep_address.push(ep.clone());
+            //Add cluster name at the end
+            let hostname = match ep.hostname.clone() {
+                Some(hostname) => {
+                    let mut hostname_w_cluster = hostname.clone();
+                    if !(hostname.contains(&cluster_name)) {
+                        hostname_w_cluster = format!("{}-{}", hostname, cluster_name);
+                    }
+                    hostname_w_cluster
+                }
+                _ => String::new(),
+            };
+
+            let mut tmp_ep = ep.clone();
+            tmp_ep.hostname = Some(hostname);
+            ep_address.push(tmp_ep);
         }
     }
     ep_address
@@ -116,7 +132,8 @@ pub async fn create_ep_slice(
     let hdls_eps = get_endpoint_slice(ctx.clone(), headless_svc.name_any()).await?;
 
     //Get existing Endpoints from EndpointSlice of target
-    let target_endpoints: Vec<Endpoint> = list_endpoints(ctx.clone(), &hdls_eps);
+    let target_endpoints: Vec<Endpoint> =
+        list_endpoints(ctx.clone(), &hdls_eps, cluster_name.clone());
 
     //Get existing ports from EndpointSlice
     //TO DO: make sure below ports exists in the global service.
