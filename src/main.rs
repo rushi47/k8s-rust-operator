@@ -1,19 +1,22 @@
-use futures::{StreamExt};
-use k8s_openapi::{
-    api::{
-        core::v1::{EndpointAddress, Service},
-    },
-};
+use futures::StreamExt;
+use k8s_openapi::api::core::v1::{EndpointAddress, Service};
+use kube::runtime::Controller;
 use kube::{
     api::{Api, ResourceExt},
     runtime::{controller::Action, watcher::Config},
     Client, Error,
 };
-use kube::{runtime::Controller};
 use std::{sync::Arc, time::Duration};
 
 mod util;
-use crate::util::{create_global_svc, check_if_aggregation_service_exists, list_endpoints, list_svc_port};
+use crate::util::{
+    check_if_aggregation_service_exists, get_parent_name, list_endpoints, list_svc_port,
+};
+
+mod global_mirror;
+use global_mirror::service::create_global_svc;
+
+const REQUE_DURATION: Duration = Duration::from_secs(5);
 
 // Should always try to derive this at least
 #[derive(Clone)]
@@ -21,41 +24,78 @@ pub struct Context(Client);
 
 async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
     /*
-    Step 1: Create the global / aggregation service, which has backing from respective ordinal services.
+    * Create the global / aggregation service, which has backing from respective ordinal services.
         - Reconcile for the svc received, i.e its being watched on.
-
         - Check if the global/Aggregation svc for the respective services exists
-
-        - If the aggregation svc exist :
-            Check if the ports, endpointslices of the SVC for which this reconciler has been called
+        - If the aggregation svc doexnt exist, create it
+        - If Global service exist , check if the ports, endpointslices of the SVC for which this reconciler has been called
             are added to global/aggregation svc.
                 - handle duplicates
                 - handle add or remove
-
     */
 
+    //Check if the aggregation service exists
+    let (if_svc_exists, global_svc_name) =
+        match check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await {
+            Ok((if_svc_exists, global_svc_name)) => (if_svc_exists, global_svc_name),
+            Err(e) => {
+                eprintln!("Unable to check if aggregation service exist : {}", e);
+                return Ok(Action::requeue(REQUE_DURATION));
+            }
+        };
 
     //Query the ports associated with this service.
-    let svc_ports = list_svc_port(svc.clone(), ctx.clone()).await?; 
+    let svc_ports = match list_svc_port(svc.clone(), ctx.clone()).await {
+        Ok(svc_ports) => svc_ports,
+        Err(e) => {
+            //If the is issue in listing ports back out of the function, dont do anything.
+            eprintln!("Issue in listing service ports : {}", e);
+            return Ok(Action::requeue(REQUE_DURATION));
+        }
+    };
 
-    //Check if the aggregation service exists
-    let (if_svc_exists, global_svc_name) = check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await;
-    
-    //If Service does exist create it. 
+    //If Service doesn't exist create it.
     if !if_svc_exists {
-        
         let namespace: String = match svc.namespace() {
             Some(ns) => ns,
             None => "".to_string(),
         };
 
-        let _global_svc =  create_global_svc(ctx.clone(), global_svc_name, namespace, svc_ports).await.expect("Issue creating global service");
-    
+        let _global_svc =
+            match create_global_svc(ctx.clone(), global_svc_name.clone(), namespace, svc_ports)
+                .await
+            {
+                Ok(global_svc) => {
+                    println!(
+                        "Global service created succesfully with name : {}",
+                        global_svc.name_any()
+                    );
+                    global_svc
+                }
+                Err(e) => {
+                    eprintln!("Issue in creating service : {}", e);
+                    return Ok(Action::requeue(REQUE_DURATION));
+                }
+            };
     }
 
-    let _svc_ep: Vec<EndpointAddress> = list_endpoints(svc.clone(), ctx.clone()).await?;
+    //Get the headless service name of mirrored target service to directly get the Endpoint
+    let headless_svc = match get_parent_name(svc.clone()).await {
+        Ok(svc_name) => svc_name,
+        Err(e) => {
+            eprintln!("Unable to get the parent service name : {}", e);
+            return Ok(Action::requeue(REQUE_DURATION));
+        }
+    };
 
-
+    //Create the EndpointSlice
+    let _svc_ep: Vec<EndpointAddress> = match list_endpoints(headless_svc, ctx.clone()).await {
+        Ok(svc_ep) => svc_ep,
+        Err(e) => {
+            eprintln!("Issue in listing endpoints : {}", e);
+            return Ok(Action::requeue(REQUE_DURATION));
+        }
+    };
 
     Ok(Action::await_change())
 }
