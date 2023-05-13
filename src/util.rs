@@ -1,4 +1,4 @@
-use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
 use kube::api::{Api, ListParams, ResourceExt};
 use std::sync::Arc;
 
@@ -11,22 +11,34 @@ pub async fn get_parent_name(svc: Arc<Service>) -> Result<String> {
     // Get the name of headless service.
     let label_key_svc_name = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
 
-    let mut parent_svc_name = String::new();
+    let mut _parent_svc_name = String::new();
 
     // Check if the key exist inside labels
     if svc.labels().contains_key(&label_key_svc_name) {
-        parent_svc_name = match svc.labels().get(&label_key_svc_name) {
+        _parent_svc_name = match svc.labels().get(&label_key_svc_name) {
             Some(svc_name) => svc_name.clone(),
             _ => svc.name_any(),
         }
     } else {
         // If key doesnt exist inside label, that means name of the service is the current service
-        parent_svc_name = svc.name_any();
+        _parent_svc_name = svc.name_any();
     }
 
-    Ok(parent_svc_name)
+    Ok(_parent_svc_name)
 }
 
+pub fn get_cluster_name(svc: &Arc<Service>) -> String {
+    /*
+       Get cluster name of where this service belongs from labels
+    */
+
+    let cluster_name = match svc.labels().get("mirror.linkerd.io/cluster-name") {
+        Some(cluster_name) => cluster_name.to_string(),
+        None => String::new(),
+    };
+
+    cluster_name
+}
 //Check if the global service exists
 pub async fn check_if_aggregation_service_exists(
     svc: Arc<Service>,
@@ -65,7 +77,7 @@ pub async fn check_if_aggregation_service_exists(
 
     let global_svc_name = parent_svc_name.replace(&target_cluster_name, "-global");
 
-    println!("Checking if the global service named : {global_svc_name} exists");
+    println!("Checking if the global service with name exists : {global_svc_name}");
 
     let svc: Api<Service> = Api::all(ctx.0.clone());
 
@@ -81,10 +93,33 @@ pub async fn check_if_aggregation_service_exists(
         )
     })?;
 
-    //Global service exist by the name
-    if svc_received.items.len() > 0 {
+    //Global service exist by the name, should only exists one service.
+    if svc_received.items.len() == 1 {
         return Ok((true, global_svc_name));
     }
 
     Ok((false, global_svc_name))
+}
+
+pub async fn check_if_ep_slice_exist(ctx: Arc<Context>, eps_name: String) -> Result<bool> {
+    /*
+        - Check if endpointslice exists
+    */
+    println!("Checking if eps exist with Name : {}", eps_name.clone());
+    let eps: Api<EndpointSlice> = Api::all(ctx.0.clone());
+
+    let eps_filter = format!("metadata.name={}", eps_name);
+    let filter = ListParams::default().fields(&eps_filter);
+
+    let eps_received = eps
+        .list(&filter)
+        .await
+        .with_context(|| format!("Unable to list EndpointSlice for name : {}", eps_name))?;
+
+    //Should on exists one endpointslice with respective name if more than one found.
+    if eps_received.items.len() == 1 {
+        return Ok(true);
+    }
+
+    Ok(false)
 }

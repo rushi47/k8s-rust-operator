@@ -94,6 +94,7 @@ pub async fn create_ep_slice(
     ctx: Arc<Context>,
     headless_svc: &Arc<Service>,
     global_svc_name: String,
+    cluster_name: String,
 ) -> Result<EndpointSlice> {
     /*
 
@@ -109,12 +110,6 @@ pub async fn create_ep_slice(
     let ns = match headless_svc.namespace() {
         Some(ns) => ns,
         _ => String::new(),
-    };
-
-    //Get cluster name
-    let cluster_name = match headless_svc.labels().get("mirror.linkerd.io/cluster-name") {
-        Some(cluster_name) => cluster_name.to_string(),
-        None => String::new(),
     };
 
     //Get EndpointSlice for target service

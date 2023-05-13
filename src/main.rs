@@ -10,7 +10,9 @@ use std::{sync::Arc, time::Duration};
 
 mod util;
 use crate::global_mirror::endpoints::create_ep_slice;
-use crate::util::{check_if_aggregation_service_exists, get_parent_name};
+use crate::util::{
+    check_if_aggregation_service_exists, check_if_ep_slice_exist, get_cluster_name, get_parent_name,
+};
 
 mod global_mirror;
 use global_mirror::service::create_global_svc;
@@ -83,18 +85,38 @@ async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Erro
         }
     };
 
-    //Create the EndpointSlice.
-    //TO DO: If first check is removed of allowing only headless service then headless_svc need to retrieved for second param.
-    let endpoint_slice = match create_ep_slice(ctx.clone(), &svc, global_svc_name).await {
-        Ok(eps) => eps,
+    //Check if endpointSlice exists
+    //Build Endpointslice name : Ex. X-global-target
+    let svc_cluster_name = get_cluster_name(&svc);
+
+    let eps_name = format!("{}-{}", global_svc_name.clone(), svc_cluster_name.clone());
+
+    let eps_if_exists = match check_if_ep_slice_exist(ctx.clone(), eps_name.clone()).await {
+        Ok(exists) => exists,
         Err(e) => {
             println!("{:?}", e);
             return Ok(Action::requeue(REQUE_DURATION));
         }
     };
 
-    println!("EndpointSlice is created : {:?}", endpoint_slice.name_any());
+    //Create the EndpointSlice if doesn't exists
+    if !eps_if_exists {
+        //TO DO: If first check is removed of allowing only headless service then headless_svc need to retrieved for second param.
+        let endpoint_slice =
+            match create_ep_slice(ctx.clone(), &svc, global_svc_name, svc_cluster_name.clone())
+                .await
+            {
+                Ok(eps) => eps,
+                Err(e) => {
+                    println!("{:?}", e);
+                    return Ok(Action::requeue(REQUE_DURATION));
+                }
+            };
 
+        println!("EndpointSlice is created : {:?}", endpoint_slice.name_any());
+    }
+
+    println!("Reconciled succesfully, Global EndpointSlice & Service should exists.");
     Ok(Action::await_change())
 }
 
