@@ -3,3 +3,4 @@ k3d-ca.*
 .DS_Store
 .vscode
 logs/*
+bootstrap-scripts/k3d-ca*
