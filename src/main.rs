@@ -21,6 +21,7 @@ use log4rs;
 
 const REQUE_DURATION: Duration = Duration::from_secs(5);
 const LOGGER_NAME: &str = "mirror-logger";
+const LOG_CONFIG: &str = "conf/lg4rs.yml";
 
 // Should always try to derive this at least
 #[derive(Clone)]
@@ -155,7 +156,7 @@ fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action 
 #[tokio::main]
 async fn main() {
     //Initailise logger
-    log4rs::init_file("conf/lg4rs.yml", Default::default()).unwrap();
+    log4rs::init_file(LOG_CONFIG, Default::default()).unwrap();
 
     info!(target: LOGGER_NAME, "Starting Global Mirror .. !!");
 
