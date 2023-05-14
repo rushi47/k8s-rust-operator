@@ -19,7 +19,7 @@ appenders:
         count: 5
         base: 1
 
-        
+#Disabled root logger to avoid duplicates        
 # root:
 #   level: off
 #   appenders:
