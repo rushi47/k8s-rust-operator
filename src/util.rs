@@ -5,9 +5,10 @@ use std::sync::Arc;
 use ::anyhow::Result;
 use anyhow::Context as anycontext;
 
-use super::Context;
+use super::{Context, LOGGER_NAME};
+use log::{debug, error};
 
-pub async fn get_parent_name(svc: Arc<Service>) -> Result<String> {
+pub fn get_parent_name(svc: Arc<Service>) -> Result<String> {
     // Get the name of headless service.
     let label_key_svc_name = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
 
@@ -53,9 +54,8 @@ pub async fn check_if_aggregation_service_exists(
         and then suffix with `-global`. Make sure there should be only one service.
     */
 
-    let parent_svc_name = get_parent_name(svc.clone())
-        .await
-        .with_context(|| "Unable to get parent name")?;
+    let parent_svc_name =
+        get_parent_name(svc.clone()).with_context(|| "Unable to get parent name")?;
 
     //Get the cluster name,
     let label_key_cluster_name = "mirror.linkerd.io/cluster-name".to_string();
@@ -65,9 +65,9 @@ pub async fn check_if_aggregation_service_exists(
     if svc.labels().contains_key(&label_key_cluster_name) {
         match svc.labels().get(&label_key_cluster_name) {
             Some(target_name) => target_cluster_name = target_name.to_string(),
-            _ => println!(
-                "Unable to get the name of target cluster : {}",
-                label_key_cluster_name
+            _ => error!(
+                target: LOGGER_NAME,
+                "Unable to get the name of target cluster : {}", label_key_cluster_name
             ),
         }
     }
@@ -77,7 +77,10 @@ pub async fn check_if_aggregation_service_exists(
 
     let global_svc_name = parent_svc_name.replace(&target_cluster_name, "-global");
 
-    println!("Checking if the global service with name exists : {global_svc_name}");
+    debug!(
+        target: LOGGER_NAME,
+        "Checking if the global service with name exists : {global_svc_name}"
+    );
 
     let svc: Api<Service> = Api::all(ctx.0.clone());
 
@@ -105,7 +108,11 @@ pub async fn check_if_ep_slice_exist(ctx: Arc<Context>, eps_name: String) -> Res
     /*
         - Check if endpointslice exists
     */
-    println!("Checking if eps exist with Name : {}", eps_name.clone());
+    debug!(
+        target: LOGGER_NAME,
+        "Checking if eps exist with Name : {}",
+        eps_name.clone()
+    );
     let eps: Api<EndpointSlice> = Api::all(ctx.0.clone());
 
     let eps_filter = format!("metadata.name={}", eps_name);

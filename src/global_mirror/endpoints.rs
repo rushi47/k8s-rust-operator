@@ -23,7 +23,6 @@ fn get_eps_labels(svc_refer_to: String, cluster_name: String) -> BTreeMap<String
         "kubernetes.io/managed-by".to_string(),
         "global-mirror-controller".to_string(),
     );
-
     lables
 }
 

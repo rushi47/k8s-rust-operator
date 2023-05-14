@@ -7,8 +7,9 @@ use kube::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-use super::super::Context;
+use super::super::{Context, LOGGER_NAME};
 use ::anyhow::Result;
+use log::debug;
 
 pub async fn list_svc_port(ctx: Arc<Context>, svc: &Arc<Service>) -> Result<Vec<ServicePort>> {
     /*
@@ -81,7 +82,10 @@ pub async fn create_global_svc(
         global_svc_name.replace("-global", ""),
     );
 
-    println!("Creating global service with name : {}", global_svc_name);
+    debug!(
+        target: LOGGER_NAME,
+        "Creating global service with name : {}", global_svc_name
+    );
 
     let svc_port: Vec<ServicePort> = list_svc_port(ctx.clone(), &svc).await?;
 

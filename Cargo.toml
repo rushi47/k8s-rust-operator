@@ -11,3 +11,5 @@ k8s-openapi = { version = "0.18.0", features = ["v1_26"] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 anyhow = "1.0.71"
+log4rs = {version = "1.2.0", features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"] }
+log = "0.4.17" 
