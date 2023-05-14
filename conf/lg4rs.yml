@@ -1,0 +1,34 @@
+appenders:
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}"
+  file_ap:
+    #Logs to file
+    kind: rolling_file
+    path: logs/global-mirror/mirror.log
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}"
+    policy:
+      trigger:
+        kind: size
+        limit: 500 kb
+      roller:
+        kind: fixed_window
+        pattern: logs/global-mirror/archive/mirror_{}.log
+        count: 5
+        base: 1
+
+        
+# root:
+#   level: off
+#   appenders:
+#     - stdout
+#     # - file_ap
+
+loggers:
+  mirror-logger:
+    level: info
+    appenders:
+      - stdout
+      # - file_ap

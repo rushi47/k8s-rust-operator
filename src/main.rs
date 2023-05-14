@@ -155,7 +155,7 @@ fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action 
 #[tokio::main]
 async fn main() {
     //Initailise logger
-    log4rs::init_file("lg4rs.yml", Default::default()).unwrap();
+    log4rs::init_file("conf/lg4rs.yml", Default::default()).unwrap();
 
     info!(target: LOGGER_NAME, "Starting Global Mirror .. !!");
 
