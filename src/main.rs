@@ -1,196 +1,103 @@
+use clap::Parser;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Service;
-use kube::runtime::Controller;
 use kube::{
-    api::{Api, ResourceExt},
-    runtime::{controller::Action, watcher::Config},
-    Client, Error,
-};
-use std::{sync::Arc, time::Duration};
-
-mod util;
-use crate::global_mirror::endpoints::create_ep_slice;
-use crate::util::{
-    check_if_aggregation_service_exists, check_if_ep_slice_exist, get_cluster_name,
-    get_parent_name, get_tracing_subscriber,
+    runtime::{
+        reflector::ObjectRef,
+        watcher::{
+            Config,
+            Event::{Applied, Deleted},
+        },
+    },
+    Api, Client, ResourceExt,
 };
 
-mod global_mirror;
-use global_mirror::service::create_global_svc;
-use tracing::{debug, error, info};
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Log Level
+    #[arg(
+        short = 'v',
+        long,
+        env = "GLOBAL_MIRROR_LOG_LEVEL",
+        default_value = "debug"
+    )]
+    log_level: String,
 
-const REQUE_DURATION: Duration = Duration::from_secs(5);
-const LOGGER_NAME: &str = "mirror-logger";
-const _LOG_CONFIG: &str = "conf/lg4rs.yml";
-
-// Should always try to derive this at least
-#[derive(Clone)]
-pub struct Context(Client);
-
-async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
-    /*
-        * Create the global / aggregation service, which has backing from respective ordinal services.
-        - Reconcile for the svc received, i.e its being watched on.
-        - Check if the global/Aggregation svc for the respective services exists
-        - If the aggregation svc doexnt exist, create it
-        - If Global service exist , check if the ports, endpointslices of the SVC for which this reconciler has been called
-            are added to global/aggregation svc.
-                - handle duplicates
-                - handle add or remove
-    */
-
-    //[Optional Optimisation] Only reconcile for headless service, as we can get all the information from headless service itself.
-    //Dont reconcile for it individual sets.
-    let label_key_svc_name = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
-    if svc.labels().contains_key(&label_key_svc_name) {
-        return Ok(Action::await_change());
-    }
-
-    //Check if the aggregation service exists
-    let (if_svc_exists, global_svc_name) =
-        match check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await {
-            Ok((if_svc_exists, global_svc_name)) => {
-                debug!(
-                    target: LOGGER_NAME,
-                    "Aggregation service exists by name : {}, skipping creation", global_svc_name
-                );
-                (if_svc_exists, global_svc_name)
-            }
-            Err(e) => {
-                error!(target: LOGGER_NAME, "{:?}", e);
-                return Ok(Action::requeue(REQUE_DURATION));
-            }
-        };
-
-    //If Service doesn't exist create it.
-    if !if_svc_exists {
-        let namespace: String = match svc.namespace() {
-            Some(ns) => ns,
-            None => "".to_string(),
-        };
-
-        let _global_svc =
-            match create_global_svc(ctx.clone(), &svc, global_svc_name.clone(), namespace).await {
-                Ok(global_svc) => {
-                    info!(
-                        target: LOGGER_NAME,
-                        "Global service created succesfully with name : {}",
-                        global_svc.name_any()
-                    );
-                    global_svc
-                }
-                Err(e) => {
-                    error!(target: LOGGER_NAME, "{:?}", e);
-                    return Ok(Action::requeue(REQUE_DURATION));
-                }
-            };
-    }
-
-    //Get the headless service name of mirrored target service to directly get the Endpoint
-    //TO DO: if we keep check of only allowing target headless service, we can remove this.
-    let _headless_svc = match get_parent_name(svc.clone()) {
-        Ok(svc_name) => {
-            debug!(
-                target: LOGGER_NAME,
-                "Get the parent name for this service : {}, parent/headless svc: {}",
-                svc.name_any().clone(),
-                svc_name
-            );
-            svc_name
-        }
-        Err(e) => {
-            error!(
-                target: LOGGER_NAME,
-                "Unable to get the parent service name : {}", e
-            );
-            return Ok(Action::requeue(REQUE_DURATION));
-        }
-    };
-
-    //Check if endpointSlice exists
-    //Build Endpointslice name : Ex. X-global-target
-    let svc_cluster_name = get_cluster_name(&svc);
-
-    let eps_name = format!("{}-{}", global_svc_name.clone(), svc_cluster_name.clone());
-
-    let eps_if_exists = match check_if_ep_slice_exist(ctx.clone(), eps_name.clone()).await {
-        Ok(exists) => exists,
-        Err(e) => {
-            error!(target: LOGGER_NAME, "{:?}", e);
-            return Ok(Action::requeue(REQUE_DURATION));
-        }
-    };
-
-    //Create the EndpointSlice if doesn't exists
-    if !eps_if_exists {
-        //TO DO: If first check is removed of allowing only headless service then headless_svc need to retrieved for second param.
-        let endpoint_slice =
-            match create_ep_slice(ctx.clone(), &svc, global_svc_name, svc_cluster_name.clone())
-                .await
-            {
-                Ok(eps) => eps,
-                Err(e) => {
-                    error!(target: LOGGER_NAME, "{:?}", e);
-                    return Ok(Action::requeue(REQUE_DURATION));
-                }
-            };
-
-        info!(
-            target: LOGGER_NAME,
-            "EndpointSlice is created : {:?}",
-            endpoint_slice.name_any()
-        );
-    }
-
-    info!(
-        target: LOGGER_NAME,
-        "Reconciled succesfully, Global EndpointSlice & Service should exists."
-    );
-    Ok(Action::await_change())
-}
-
-fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action {
-    Action::requeue(Duration::from_secs(5))
+    // TODO: write a parser to support arbitrary time units (ms, s, m should be
+    // enough)
+    /// Requeue duration (in seconds)
+    #[arg(long, default_value = "5")]
+    _requeue_duration: usize,
 }
 
 #[tokio::main]
-async fn main() {
-    let subscriber = get_tracing_subscriber();
+async fn main() -> anyhow::Result<()> {
+    let Args {
+        log_level,
+        _requeue_duration,
+    } = Args::parse();
 
-    match tracing::subscriber::set_global_default(subscriber) {
-        Ok(_) => debug!(target: LOGGER_NAME, "Subscriber Configured successfully."),
-        Err(err) => error!(
-            target: LOGGER_NAME,
-            "Issue configuring subscriber : {}", err
-        ),
-    }
+    let env_filter = tracing_subscriber::EnvFilter::builder()
+        .with_regex(false)
+        .parse(log_level)?;
 
-    info!(target: LOGGER_NAME, "Starting Global Mirror .. !!");
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     // Create the client
     let client = Client::try_default()
         .await
         .expect("Failed to create client from env defaults");
 
-    let linkerd_svc = Api::all(client.clone());
+    let svc = Api::<Service>::all(client.clone());
+    let svc_filter = Config::default().labels("mirror.linkerd.io/mirrored-service=true");
 
-    let context: Arc<Context> = Arc::new(Context(client.clone()));
+    // Reflector store handles cached objects, writer needs to be sent to
+    // watcher, reader half can be cloned as needed.
+    let (mirror_services, mirror_svc_writer) = kube::runtime::reflector::store::<Service>();
+    // Infinite stream
+    let rf = kube::runtime::reflector(mirror_svc_writer, kube::runtime::watcher(svc, svc_filter));
+    tokio::pin!(rf);
+    while let Some(ev) = rf.next().await {
+        // Stream will be terminated eagerly on error?
+        let ev = ev?;
+        match ev {
+            Applied(svc) | Deleted(svc) => {
+                if svc
+                    .labels()
+                    .contains_key("mirror.linkerd.io/headless-mirror-svc-name")
+                {
+                    // Do not process headless hostname services
+                    continue;
+                }
 
-    Controller::new(
-        linkerd_svc.clone(),
-        Config::default().labels("mirror.linkerd.io/mirrored-service=true"),
-    )
-    .run(reconciler, error_policy, context)
-    .for_each(|reconciliation_result| async move {
-        match reconciliation_result {
-            Ok(_linkerd_svc_resource) => {
-                // println!("Received the resource : {:?}", linkerd_svc_resource)
+                // TODO: Need to filter on ClusterIP None, otherwise we get all mirror
+                // services
+
+                let has_global = {
+                    // Get service name without cluster suffix
+                    let svc_name = if let Some(name) = svc
+                        .labels()
+                        .get("mirror.linkerd.io/cluster-name".into())
+                        .map(|cluster_name| svc.name_any().replace(cluster_name, "global"))
+                    {
+                        name
+                    } else {
+                        tracing::debug!(svc = %svc.name_any(), "mirror service missing annotation");
+                        continue;
+                    };
+
+                    mirror_services.get(&ObjectRef::<Service>::new(&svc_name))
+                };
+
+                let global_service = has_global.unwrap_or_else(|| {
+                    // create service
+                    todo!();
+                });
             }
-            Err(err) => error!(
-                target: LOGGER_NAME,
-                "Received error in reconcilation : {:?}", err
-            ),
+            _ => {}
         }
-    })
-    .await;
+    }
+
+    Ok(())
 }
