@@ -1,247 +1,172 @@
 use futures::StreamExt;
-use k8s_openapi::{
-    api::{
-        core::v1::{Endpoints, Pod, Service, ServicePort, ServiceSpec},
-        discovery::v1::{Endpoint, EndpointSlice},
-    },
-    List,
-};
+use k8s_openapi::api::core::v1::Service;
+use kube::runtime::Controller;
 use kube::{
-    api::{Api, ListParams, PostParams, ResourceExt},
-    core::ObjectMeta,
+    api::{Api, ResourceExt},
     runtime::{controller::Action, watcher::Config},
     Client, Error,
 };
-use kube::{core::ObjectList, runtime::Controller};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-async fn _query_pods(client: Client, ns: &str) -> anyhow::Result<()> {
-    /*
-        // Namespace where it will be looked
-         let ns = "linkerd".to_string();
+mod util;
+use crate::global_mirror::endpoints::create_ep_slice;
+use crate::util::{
+    check_if_aggregation_service_exists, check_if_ep_slice_exist, get_cluster_name,
+    get_parent_name, get_tracing_subscriber,
+};
 
-         query_pods(client.clone(), &ns).await.unwrap();
+mod global_mirror;
+use global_mirror::service::create_global_svc;
+use tracing::{debug, error, info};
 
-         query_services(client.clone(), &ns).await.unwrap();
-
-         let linkerd_svc: Api<Endpoints> = Api::all(client.clone());
-         for ep in linkerd_svc.list(&ListParams::default()).await? {
-             println!("Ep for all : {}", ep.name_any());
-         }
-    */
-    // Query the pods
-    let pods = Api::<Pod>::namespaced(client, ns);
-    for p in pods.list(&ListParams::default()).await? {
-        // Pod IDs typically follow a <namespace>/<name> format
-        println!("Pod {}/{}", ns, p.name_any());
-    }
-
-    // Implicit return
-    Ok(())
-}
-
-async fn _query_services(client: Client, ns: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Query the services
-    let service = Api::<Service>::namespaced(client, ns);
-    for svc in service.list(&ListParams::default()).await? {
-        // Can also format like this if you think it's more readable
-        println!("Service {ns}/{}", svc.name_any());
-    }
-    Ok(())
-}
+const REQUE_DURATION: Duration = Duration::from_secs(5);
+const LOGGER_NAME: &str = "mirror-logger";
+const _LOG_CONFIG: &str = "conf/lg4rs.yml";
 
 // Should always try to derive this at least
 #[derive(Clone)]
 pub struct Context(Client);
 
-async fn create_global_svc(
-    ctx: Arc<Context>,
-    svc_name: String,
-    ns: String,
-    svc_port: Vec<ServicePort>,
-) -> anyhow::Result<()> {
-    /*
-       - Create the global Service if it doesnt exist
-       - Get the EndpointSlices from other Services
-       - Add those EndpointSlices as backing to global Service.
-    */
-
-    let mut labels: BTreeMap<String, String> = BTreeMap::new();
-    labels.insert("linkerd.io/service-mirror".to_string(), "true".to_string());
-    labels.insert("linkerd.io/global-mirror".to_string(), "true".to_string());
-
-    let svc_meta = ObjectMeta {
-        labels: Some(labels.clone()),
-        name: Some(format!("{svc_name}-svc-global")),
-        namespace: Some(ns.to_string()),
-        ..ObjectMeta::default()
-    };
-
-    let svc_spec = ServiceSpec {
-        cluster_ip: Some("None".to_string()),
-        ports: Some(svc_port),
-        selector: Some(labels.clone()),
-        ..Default::default()
-    };
-
-    let service_to_create = Service {
-        metadata: svc_meta,
-        spec: Some(svc_spec),
-        ..Service::default()
-    };
-
-    // create service
-    let svc: Api<Service> = Api::namespaced(ctx.0.clone(), &ns);
-
-    // Why handle this here instead of bubbling up?
-    match svc.create(&PostParams::default(), &service_to_create).await {
-        Ok(tmp) => println!("Created the service : {}", tmp.name_any()),
-        Err(e) => println!("Failed creating service : {}", e),
-    }
-
-    // Why do we return a result if we only return Ok?
-    Ok(())
-}
-
-//Check if the global service exists
-async fn check_if_aggregation_service_exists(
-    svc: Arc<Service>,
-    ctx: Arc<Context>,
-) -> ObjectList<Service> {
-    /*
-        - Simply check if the service named with suffix or the name decided exists, if list isnt empty it exists.
-    */
-
-    let name_svc = "cockroach-db-global".to_string();
-
-    let svc: Api<Service> = Api::all(ctx.0.clone());
-
-    let label_filter = format!("app={name_svc}");
-
-    let svc_filter = ListParams::default().labels(&label_filter);
-
-    //check if it has any service named this global.
-    return svc.list(&svc_filter).await.unwrap();
-}
-
-async fn list_svc_port(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Vec<ServicePort>, Error> {
-    println!("Listing the service port : {}", svc.name_any());
-
-    let services: Api<Service> = Api::all(ctx.0.clone());
-
-    let svc_name = format!("app={}", svc.name_any());
-
-    let svc_filter = ListParams::default().labels(&svc_name);
-
-    let mut service_ports: Vec<ServicePort> = Vec::new();
-
-    for svc in services.list(&svc_filter).await? {
-        println!("Name of the servcice : {:?} ", svc.name_any());
-        for svc_spec in svc.spec.iter() {
-            let vec_port = svc_spec.ports.clone();
-            match vec_port {
-                Some(ports) => {
-                    //Check if already the same object exist (not full fledge solution to check dedup)
-                    for svc_port in ports.iter() {
-                        if !service_ports.contains(svc_port) {
-                            service_ports.push(svc_port.clone());
-                        }
-                    }
-                }
-                _ => println!("No service port found"),
-            }
-        }
-    }
-
-    return Ok(service_ports);
-}
-async fn list_endpoints(svc: Arc<Service>, ctx: Arc<Context>) -> Result<(), Error> {
-    /*
-        - Try querying or simply listing all the endpoints for the service
-        -  Filter the EndpointSlice on the name of Service Passed
-    */
-    let ep_slices: Api<Endpoints> = Api::all(ctx.0.clone());
-
-    let svc_name = svc.name_any();
-    let ep_slice_name = format!("app={svc_name}");
-
-    let ep_filter = ListParams::default().labels(&ep_slice_name);
-    for ep in ep_slices.list(&ep_filter).await? {
-        println!("Endpoints for the Endpoint Slice : {:?} ", ep.name_any());
-        for sub in ep.subsets.iter() {
-            for addr in sub.iter() {
-                // println!("Host : {:?}", addr);
-                for host in addr.addresses.iter() {
-                    for epa in host.iter() {
-                        println!("Addresses: {:?}, hostname: {:?}", epa.ip, epa.hostname);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 async fn reconciler(svc: Arc<Service>, ctx: Arc<Context>) -> Result<Action, Error> {
     /*
-    Step 1: Create the global / aggregation service, which has backing from respective ordinal services.
+        * Create the global / aggregation service, which has backing from respective ordinal services.
         - Reconcile for the svc received, i.e its being watched on.
-
         - Check if the global/Aggregation svc for the respective services exists
-
-        - If the aggregation svc exist :
-            Check if the ports, endpointslices of the SVC for which this reconciler has been called
+        - If the aggregation svc doexnt exist, create it
+        - If Global service exist , check if the ports, endpointslices of the SVC for which this reconciler has been called
             are added to global/aggregation svc.
                 - handle duplicates
                 - handle add or remove
-
     */
 
-    if let Some(ts) = &svc.metadata.deletion_timestamp {
-        println!(
-            "Service : {} being delete in time : {:?}",
-            svc.name_any(),
-            &ts
-        );
-        //remove finalizers and return from here
+    //[Optional Optimisation] Only reconcile for headless service, as we can get all the information from headless service itself.
+    //Dont reconcile for it individual sets.
+    let label_key_svc_name = "mirror.linkerd.io/headless-mirror-svc-name".to_string();
+    if svc.labels().contains_key(&label_key_svc_name) {
+        return Ok(Action::await_change());
     }
 
-    let svc_ports = list_svc_port(svc.clone(), ctx.clone()).await?;
+    //Check if the aggregation service exists
+    let (if_svc_exists, global_svc_name) =
+        match check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await {
+            Ok((if_svc_exists, global_svc_name)) => {
+                debug!(
+                    target: LOGGER_NAME,
+                    "Aggregation service exists by name : {}, skipping creation", global_svc_name
+                );
+                (if_svc_exists, global_svc_name)
+            }
+            Err(e) => {
+                error!(target: LOGGER_NAME, "{:?}", e);
+                return Ok(Action::requeue(REQUE_DURATION));
+            }
+        };
 
-    println!("Received the svc ports : {:?}", svc_ports);
-
-    list_endpoints(svc.clone(), ctx.clone()).await?;
-
-    let check_if_svc_exists = check_if_aggregation_service_exists(svc.clone(), ctx.clone()).await;
-
-    println!(
-        "Checking if aggregation svc exists {}",
-        check_if_svc_exists.items.len()
-    );
-    if !check_if_svc_exists.items.len() > 0 {
-        println!("Create the global svc");
-
+    //If Service doesn't exist create it.
+    if !if_svc_exists {
         let namespace: String = match svc.namespace() {
             Some(ns) => ns,
             None => "".to_string(),
         };
-        if svc_ports.len() > 1 {
-            create_global_svc(ctx, svc.name_any(), namespace, svc_ports)
-                .await
-                .unwrap();
-        }
+
+        let _global_svc =
+            match create_global_svc(ctx.clone(), &svc, global_svc_name.clone(), namespace).await {
+                Ok(global_svc) => {
+                    info!(
+                        target: LOGGER_NAME,
+                        "Global service created succesfully with name : {}",
+                        global_svc.name_any()
+                    );
+                    global_svc
+                }
+                Err(e) => {
+                    error!(target: LOGGER_NAME, "{:?}", e);
+                    return Ok(Action::requeue(REQUE_DURATION));
+                }
+            };
     }
 
+    //Get the headless service name of mirrored target service to directly get the Endpoint
+    //TO DO: if we keep check of only allowing target headless service, we can remove this.
+    let _headless_svc = match get_parent_name(svc.clone()) {
+        Ok(svc_name) => {
+            debug!(
+                target: LOGGER_NAME,
+                "Get the parent name for this service : {}, parent/headless svc: {}",
+                svc.name_any().clone(),
+                svc_name
+            );
+            svc_name
+        }
+        Err(e) => {
+            error!(
+                target: LOGGER_NAME,
+                "Unable to get the parent service name : {}", e
+            );
+            return Ok(Action::requeue(REQUE_DURATION));
+        }
+    };
+
+    //Check if endpointSlice exists
+    //Build Endpointslice name : Ex. X-global-target
+    let svc_cluster_name = get_cluster_name(&svc);
+
+    let eps_name = format!("{}-{}", global_svc_name.clone(), svc_cluster_name.clone());
+
+    let eps_if_exists = match check_if_ep_slice_exist(ctx.clone(), eps_name.clone()).await {
+        Ok(exists) => exists,
+        Err(e) => {
+            error!(target: LOGGER_NAME, "{:?}", e);
+            return Ok(Action::requeue(REQUE_DURATION));
+        }
+    };
+
+    //Create the EndpointSlice if doesn't exists
+    if !eps_if_exists {
+        //TO DO: If first check is removed of allowing only headless service then headless_svc need to retrieved for second param.
+        let endpoint_slice =
+            match create_ep_slice(ctx.clone(), &svc, global_svc_name, svc_cluster_name.clone())
+                .await
+            {
+                Ok(eps) => eps,
+                Err(e) => {
+                    error!(target: LOGGER_NAME, "{:?}", e);
+                    return Ok(Action::requeue(REQUE_DURATION));
+                }
+            };
+
+        info!(
+            target: LOGGER_NAME,
+            "EndpointSlice is created : {:?}",
+            endpoint_slice.name_any()
+        );
+    }
+
+    info!(
+        target: LOGGER_NAME,
+        "Reconciled succesfully, Global EndpointSlice & Service should exists."
+    );
     Ok(Action::await_change())
 }
 
-fn error_policy(svc: Arc<Service>, err: &Error, ctx: Arc<Context>) -> Action {
+fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action {
     Action::requeue(Duration::from_secs(5))
 }
 
 #[tokio::main]
 async fn main() {
+    let subscriber = get_tracing_subscriber();
+
+    match tracing::subscriber::set_global_default(subscriber) {
+        Ok(_) => debug!(target: LOGGER_NAME, "Subscriber Configured successfully."),
+        Err(err) => error!(
+            target: LOGGER_NAME,
+            "Issue configuring subscriber : {}", err
+        ),
+    }
+
+    info!(target: LOGGER_NAME, "Starting Global Mirror .. !!");
+
     // Create the client
     let client = Client::try_default()
         .await
@@ -253,15 +178,18 @@ async fn main() {
 
     Controller::new(
         linkerd_svc.clone(),
-        Config::default().labels("app=cockroachdb"),
+        Config::default().labels("mirror.linkerd.io/mirrored-service=true"),
     )
     .run(reconciler, error_policy, context)
     .for_each(|reconciliation_result| async move {
         match reconciliation_result {
-            Ok(linkerd_svc_resource) => {
-                println!("Received the resource : {:?}", linkerd_svc_resource)
+            Ok(_linkerd_svc_resource) => {
+                // println!("Received the resource : {:?}", linkerd_svc_resource)
             }
-            Err(err) => println!("Received error in reconcilation : {}", err),
+            Err(err) => error!(
+                target: LOGGER_NAME,
+                "Received error in reconcilation : {:?}", err
+            ),
         }
     })
     .await;

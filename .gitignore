@@ -1,3 +1,5 @@
 /target
 k3d-ca.*
 .DS_Store
+.vscode
+bootstrap-scripts/k3d-ca*
