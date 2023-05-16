@@ -27,7 +27,7 @@ k3d-create: && install-linkerd
    #!/usr/bin/env bash
    set -euxo pipefail
    port=6440
-   for cluster in east west south ; do
+   for cluster in source target1 target2 ; do
       if k3d cluster get "$cluster" >/dev/null 2>&1 ; then
          echo "Already exists: $cluster" >&2
          ((port++))
@@ -73,7 +73,7 @@ install-linkerd: && link-mc
       --profile root-ca \
       --no-password  --insecure --force
 
-   for cluster in east west south; do
+   for cluster in source target1 target2; do
       # Check that the cluster is up and running.
       while ! $LINKERD --context="k3d-$cluster" check --pre ; do :; done
 
@@ -135,35 +135,35 @@ link-mc: && install-testset
                --api-server-address="https://${lb_ip}:6443")" 
    }
 
-   # East, West & south get access to each other.
-   fetch_credentials k3d-east | kubectl --context=k3d-west apply -n linkerd-multicluster -f -
-   fetch_credentials k3d-south | kubectl --context=k3d-west apply -n linkerd-multicluster -f -
+   # source, target1 & target2 get access to each other.
+   fetch_credentials k3d-source | kubectl --context=k3d-target1 apply -n linkerd-multicluster -f -
+   fetch_credentials k3d-target2 | kubectl --context=k3d-target1 apply -n linkerd-multicluster -f -
 
-   fetch_credentials k3d-west | kubectl --context=k3d-east apply -n linkerd-multicluster -f -
-   fetch_credentials k3d-south | kubectl --context=k3d-east apply -n linkerd-multicluster -f -
+   fetch_credentials k3d-target1 | kubectl --context=k3d-source apply -n linkerd-multicluster -f -
+   fetch_credentials k3d-target2 | kubectl --context=k3d-source apply -n linkerd-multicluster -f -
 
-   fetch_credentials k3d-west | kubectl --context=k3d-south apply -n linkerd-multicluster -f -
-   fetch_credentials k3d-east | kubectl --context=k3d-south apply -n linkerd-multicluster -f -
+   fetch_credentials k3d-target1 | kubectl --context=k3d-target2 apply -n linkerd-multicluster -f -
+   fetch_credentials k3d-source | kubectl --context=k3d-target2 apply -n linkerd-multicluster -f -
 
    sleep 10
-   for c in k3d-east k3d-west ; do
+   for c in k3d-source k3d-target1 ; do
       $LINKERD --context="$c" mc check
    done
 
-#Install 2 statefulset in west & south multicluster & dnsutil for testing in east
+#Install 2 statefulset in target1 & target2 multicluster & dnsutil for testing in source
 install-testset:
-   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-west apply -f -
-   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-south apply -f -
+   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-target1 apply -f -
+   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-target2 apply -f -
 
-   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-west apply -f -
-   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-south apply -f -
+   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-target1 apply -f -
+   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-target2 apply -f -
 
-   cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-east apply -f -
+   cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source apply -f -
 
 #Delete all three clusters.
 k3d-delete:
    #!/usr/bin/env bash
    set -euxo pipefail
-   for cluster in east west south ; do
+   for cluster in source target1 target2 ; do
       k3d cluster delete "$cluster";
    done

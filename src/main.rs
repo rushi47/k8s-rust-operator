@@ -11,17 +11,17 @@ use std::{sync::Arc, time::Duration};
 mod util;
 use crate::global_mirror::endpoints::create_ep_slice;
 use crate::util::{
-    check_if_aggregation_service_exists, check_if_ep_slice_exist, get_cluster_name, get_parent_name,
+    check_if_aggregation_service_exists, check_if_ep_slice_exist, get_cluster_name,
+    get_parent_name, get_tracing_subscriber,
 };
 
 mod global_mirror;
 use global_mirror::service::create_global_svc;
 use tracing::{debug, error, info};
-use log4rs;
 
 const REQUE_DURATION: Duration = Duration::from_secs(5);
 const LOGGER_NAME: &str = "mirror-logger";
-const LOG_CONFIG: &str = "conf/lg4rs.yml";
+const _LOG_CONFIG: &str = "conf/lg4rs.yml";
 
 // Should always try to derive this at least
 #[derive(Clone)]
@@ -155,8 +155,15 @@ fn error_policy(_svc: Arc<Service>, _err: &Error, _ctx: Arc<Context>) -> Action 
 
 #[tokio::main]
 async fn main() {
-    //Initailise logger
-    log4rs::init_file(LOG_CONFIG, Default::default()).unwrap();
+    let subscriber = get_tracing_subscriber();
+
+    match tracing::subscriber::set_global_default(subscriber) {
+        Ok(_) => debug!(target: LOGGER_NAME, "Subscriber Configured successfully."),
+        Err(err) => error!(
+            target: LOGGER_NAME,
+            "Issue configuring subscriber : {}", err
+        ),
+    }
 
     info!(target: LOGGER_NAME, "Starting Global Mirror .. !!");
 
