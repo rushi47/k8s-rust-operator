@@ -16,7 +16,7 @@ use crate::util::{
 
 mod global_mirror;
 use global_mirror::service::create_global_svc;
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 use log4rs;
 
 const REQUE_DURATION: Duration = Duration::from_secs(5);

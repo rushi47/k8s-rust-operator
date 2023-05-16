@@ -13,3 +13,4 @@ futures = "0.3"
 anyhow = "1.0.71"
 log4rs = {version = "1.2.0", features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"] }
 log = "0.4.17" 
+tracing = "0.1.28"

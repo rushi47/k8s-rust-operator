@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use super::super::{Context, LOGGER_NAME};
 use ::anyhow::Result;
-use log::debug;
+use tracing::debug;
 
 pub async fn list_svc_port(ctx: Arc<Context>, svc: &Arc<Service>) -> Result<Vec<ServicePort>> {
     /*

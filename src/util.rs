@@ -6,7 +6,7 @@ use ::anyhow::Result;
 use anyhow::Context as anycontext;
 
 use super::{Context, LOGGER_NAME};
-use log::{debug, error};
+use tracing::{debug, error};
 
 pub fn get_parent_name(svc: Arc<Service>) -> Result<String> {
     // Get the name of headless service.
