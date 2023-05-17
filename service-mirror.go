@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	apiError "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -93,15 +94,53 @@ func main() {
 
 	}
 
-	// Check if the global service exists
+	//Iterate over map of targetCluster -> headlessService and check if global service exists.
 	for tgCluster, mirrorService := range mirroredService {
 		log.Debug("Key=", tgCluster)
 		for _, hdlSvc := range mirrorService {
+			hdlSvc = *hdlSvc.DeepCopy()
 			//Check if global/aggregator service exists
 			log.Debug("Svc from cluster = ", hdlSvc.Name)
 			globalSvcName := strings.Split(hdlSvc.Name, fmt.Sprintf("-%s", tgCluster))[0]
 			globalSvcName = globalSvcName + "-global"
 			log.Info("Global svc Name = ", globalSvcName)
+			_, err := client.CoreV1().Services("").Get(context.Background(), globalSvcName, metav1.GetOptions{})
+
+			//If global service doesnt exist cerate it
+			if !apiError.IsAlreadyExists(err) {
+
+				/*
+					- Spin up the new global service with cardinal index as x-global,
+					Which will be aggregator for mirrored services from target cluster x-target0, x-target1
+				*/
+
+				svcMeta := &metav1.ObjectMeta{
+					Name:      globalSvcName,
+					Namespace: hdlSvc.Namespace,
+					Labels: map[string]string{
+						"mirror.linkerd.io/global-mirror-for": tgCluster,
+					},
+				}
+
+				svcSpec := &corev1.ServiceSpec{
+					ClusterIP: "None",
+					Ports:     hdlSvc.Spec.Ports,
+				}
+				globalService := &corev1.Service{
+					ObjectMeta: *svcMeta,
+					Spec:       *svcSpec,
+				}
+				//Create clientSet to create Service
+				defaultCreateOptions := metav1.CreateOptions{}
+				globalSvc, err := client.CoreV1().Services(hdlSvc.Namespace).Create(context.Background(), globalService, defaultCreateOptions)
+				if !apiError.IsAlreadyExists(err) {
+					log.Info("Unable to create Service with", "name=", globalSvcName, "err=", err)
+				}
+				log.Info("Global Service Create", "svc=", globalSvc.Name)
+
+			} else {
+				log.Error("Unable to get the global Service", "Name=", globalSvcName)
+			}
 
 		}
 	}
