@@ -132,16 +132,13 @@ func main() {
 				}
 				//Create clientSet to create Service
 				defaultCreateOptions := metav1.CreateOptions{}
-				globalSvc, err := client.CoreV1().Services(hdlSvc.Namespace).Create(context.Background(), globalService, defaultCreateOptions)
+				_, err := client.CoreV1().Services(hdlSvc.Namespace).Create(context.Background(), globalService, defaultCreateOptions)
 				if !apiError.IsAlreadyExists(err) {
-					log.Info("Unable to create Service with", "name=", globalSvcName, "err=", err)
+					log.Info("Service already exists with", "name=", globalSvcName)
 				}
-				log.Info("Global Service Create", "svc=", globalSvc.Name)
 
-			} else {
-				log.Error("Unable to get the global Service", "Name=", globalSvcName)
 			}
-
+			log.Info("Global Service with Name: ", globalSvcName, " should be existing.")
 		}
 	}
 }
