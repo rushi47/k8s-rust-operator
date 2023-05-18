@@ -281,20 +281,35 @@ func handleServiceDelete(ctx *Context, obj interface{}) {
 	log.Info("Service being Deleted,  ", service.Name)
 }
 
-func getSharedInformer(client kubernetes.Clientset, svcFilter labels.Selector) cache.SharedInformer {
+func getSharedInformer(ctx Context, svcFilter labels.Selector) cache.SharedInformer {
+	//Get enformer and add event handler
 	informer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return client.CoreV1().Services("").List(context.Background(), metav1.ListOptions{LabelSelector: svcFilter.String()})
+				return ctx.client.CoreV1().Services("").List(context.Background(), metav1.ListOptions{LabelSelector: svcFilter.String()})
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return client.CoreV1().Services("").Watch(context.Background(), metav1.ListOptions{LabelSelector: svcFilter.String()})
+				return ctx.client.CoreV1().Services("").Watch(context.Background(), metav1.ListOptions{LabelSelector: svcFilter.String()})
 			},
 		},
 		&corev1.Service{},
 		time.Second*90, // sync after 90 seconds
 		cache.Indexers{},
 	)
+
+	// Register the event handlers for additions and updates
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			handleServiceAdd(&ctx, obj)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			handleServiceUpdate(&ctx, oldObj, newObj)
+		},
+		DeleteFunc: func(obj interface{}) {
+			handleServiceDelete(&ctx, obj)
+		},
+	})
+
 	return informer
 }
 
@@ -302,6 +317,13 @@ type Context struct {
 	ctx    context.Context
 	log    logrus.Logger
 	client kubernetes.Clientset
+}
+
+type globalServiceMirrorInformers struct {
+	//Service handle rinformer
+	svcInformer cache.SharedInformer
+	//Endpoint handler informer
+	// epInformer cache.ResourceEventHandler
 }
 
 func main() {
@@ -354,22 +376,14 @@ func main() {
 	svcFilter := getServiceFilter(*ctx)
 
 	//Get informer in run in go routine.
-	informer := getSharedInformer(*client, svcFilter)
+	informer := getSharedInformer(*ctx, svcFilter)
 
-	// Register the event handlers for additions and updates
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			handleServiceAdd(ctx, obj)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			handleServiceUpdate(ctx, oldObj, newObj)
-		},
-		DeleteFunc: func(obj interface{}) {
-			handleServiceDelete(ctx, obj)
-		},
-	})
+	//Build global informer
+	globaMirrorInformer := globalServiceMirrorInformers{
+		svcInformer: informer,
+	}
 
-	go informer.Run(stopCh)
+	go globaMirrorInformer.svcInformer.Run(stopCh)
 
 	// Wait until the informer is synced
 	if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
