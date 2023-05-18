@@ -123,9 +123,9 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 		if !reflect.DeepEqual(targetSvcPort, globalSvcPort) {
 			//Check port by port, to make sure there is no change.
 			//Create map to do efficient checking
-			log.Debug("Looks like there is difference in Ports ", "TargetSvcPort= ", targetSvcPort, " GlobalSvcPort=", globalSvcPort, " syncing config.")
 			mapPort := make(map[corev1.ServicePort]corev1.ServicePort)
 			for _, port := range globalSvcPort {
+				port.Name = ""
 				mapPort[port] = corev1.ServicePort{}
 				mapPort[port] = port
 			}
@@ -141,6 +141,8 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 			//Checking now it should return true.
 			if !reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
 				//Only update ports.
+				log.Debug("Looks like there is difference in Ports ", "NewPorts= ", globalSvcPort, " ExistingPorts=", globalSvc.Spec.Ports, " syncing config.")
+
 				defaultCreateOptions := metav1.CreateOptions{}
 
 				for i, p := range globalSvcPort {
@@ -265,7 +267,18 @@ func handleServiceDelete(ctx *Context, obj interface{}) {
 		ctx.log.Errorln("Failed to cast object to Service type")
 		return
 	}
-	ctx.log.Info("Service being Deleted,  ", service.Name)
+	log := ctx.log
+
+	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
+	_, err := ctx.client.CoreV1().Services("").List(ctx.ctx, metav1.ListOptions{LabelSelector: targetClusterame})
+	if err != nil {
+		log.Error("Unable to list services  for label: ", targetClusterame)
+		log.Error(err)
+		return
+	}
+
+	//TO DO : Make sure if all the services are deleted for cluster, global service is also deleted.
+	log.Info("Service being Deleted,  ", service.Name)
 }
 
 func getSharedInformer(client kubernetes.Clientset, svcFilter labels.Selector) cache.SharedInformer {
