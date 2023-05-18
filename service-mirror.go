@@ -34,26 +34,25 @@ func main() {
 	//Shows line number: Too long
 	// log.SetReportCaller(true)
 
-	log.Info("-- Starting Global Mirror ---")
+	log.Infof("Starting Global Mirror")
 
 	var kubeconfig *string
 	if home := homedir.HomeDir(); home != "" {
 		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	} else {
-		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
 	}
+
 	flag.Parse()
 
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		log.Panicln("Probably running Inside Cluster", err.Error())
+		log.Panicf("Probably running Inside Cluster :%s", err.Error())
 	}
 
 	// creates the clientset
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Panicln("Issue in building client from config", err.Error())
+		log.Panicf("Issue in building client from config : %s", err.Error())
 	}
 
 	/* Get running services in all the names, labelled with "mirror.linkerd.io/mirrored-service: true"
@@ -61,13 +60,13 @@ func main() {
 	*/
 	mirrorSvcLabel, err := labels.NewRequirement("mirror.linkerd.io/mirrored-service", selection.Equals, []string{"true"})
 	if err != nil {
-		log.Errorln("Unable to generate error requirement", "Err", err.Error())
+		log.Errorf("Unable to generate error requirement : %s", err.Error())
 	}
 
 	// Create label requirements for "mirror.linkerd.io/headless-mirror-svc-name" not existing
 	mirrorSvcParentLabel, err := labels.NewRequirement("mirror.linkerd.io/headless-mirror-svc-name", selection.DoesNotExist, []string{})
 	if err != nil {
-		log.Errorln("Unable to generate error requirement", "Err", err.Error())
+		log.Errorf("Unable to generate error requirement : %s", err.Error())
 	}
 
 	// Create the label selector
@@ -78,7 +77,7 @@ func main() {
 	mirroredServices, err := client.CoreV1().Services("").List(context.Background(), metav1.ListOptions{LabelSelector: svcFilter.String()})
 
 	if err != nil {
-		log.Errorln("Unable to get running services for filter", "filter : ", svcFilter.String(), "Err : \n", err.Error())
+		log.Errorf("Unable to get running services for filter : %s, Error: %s", svcFilter.String(), err.Error())
 	}
 
 	//Map of Mirrored services with targetCluster as key and responding service
@@ -100,10 +99,10 @@ func main() {
 		for _, hdlSvc := range mirrorService {
 			hdlSvc = *hdlSvc.DeepCopy()
 			//Check if global/aggregator service exists
-			log.Debug("Svc from cluster = ", hdlSvc.Name)
+			log.Debugf("Svc from cluster = %s", hdlSvc.Name)
 			globalSvcName := strings.Split(hdlSvc.Name, fmt.Sprintf("-%s", tgCluster))[0]
 			globalSvcName = globalSvcName + "-global"
-			log.Info("Global svc Name = ", globalSvcName)
+			log.Infof("Global svc Name = %s ", globalSvcName)
 			_, err := client.CoreV1().Services("").Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 			//If global service doesnt exist cerate it
@@ -134,11 +133,11 @@ func main() {
 				defaultCreateOptions := metav1.CreateOptions{}
 				_, err := client.CoreV1().Services(hdlSvc.Namespace).Create(context.Background(), globalService, defaultCreateOptions)
 				if !apiError.IsAlreadyExists(err) {
-					log.Info("Service already exists with", "name=", globalSvcName)
+					log.Infof("Service already exists with, name=%s", globalSvcName)
 				}
 
 			}
-			log.Info("Global Service with Name: ", globalSvcName, " should be existing.")
+			log.Infof("Global Service with Name: %s  should be existing", globalSvcName)
 		}
 	}
 }
