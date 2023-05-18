@@ -376,17 +376,17 @@ func main() {
 	svcFilter := getServiceFilter(*ctx)
 
 	//Get informer in run in go routine.
-	informer := getSharedInformer(*ctx, svcFilter)
+	svcInformer := getSharedInformer(*ctx, svcFilter)
 
 	//Build global informer
 	globaMirrorInformer := globalServiceMirrorInformers{
-		svcInformer: informer,
+		svcInformer: svcInformer,
 	}
 
 	go globaMirrorInformer.svcInformer.Run(stopCh)
 
 	// Wait until the informer is synced
-	if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
+	if !cache.WaitForCacheSync(stopCh, globaMirrorInformer.svcInformer.HasSynced) {
 		log.Panicln("Failed to sync informer cache")
 	}
 
