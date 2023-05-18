@@ -58,6 +58,8 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 
 	*/
 	log := ctx.log
+	client := ctx.client
+
 	service, ok := obj.(*corev1.Service)
 	if !ok {
 		log.Errorln("Failed to cast object to Service type")
@@ -68,24 +70,24 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
 
 	targetSvc := service.DeepCopy()
-	client := ctx.client
 
 	// Check if global/aggregator service exists.
 	// We dont have this object in Local Cache so check directly.
-	// TO DO: Add object in local cache.
+	// TO DO: Add global object in local cache.
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
 	log.Info("Checking global Svc Named = ", globalSvcName, " if exists")
 	globalSvc, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
-	if !apiError.IsAlreadyExists(err) {
+	if err != nil && !apiError.IsAlreadyExists(err) {
 
 		/*
 			- Spin up the new global service with cardinal index as x-global,
 			Which will be aggregator for mirrored services from targetSvc. cluster x-targetSvc.0, x-targetSvc.1
 			Global service will always be created in Default.
 		*/
+		log.Info("New Global Service will be created.", "Name=", globalSvcName)
 
 		svcMeta := &metav1.ObjectMeta{
 			Name:      globalSvcName,
@@ -109,18 +111,19 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 		if !apiError.IsAlreadyExists(err) && err != nil {
 			log.Error("Issue with service creation", "name=", globalSvcName)
 			log.Error(err)
+			return
 		}
 
 	} else {
 		// If service already exists, check if the port from the target service are inside global svc.
 		log.Debug("Skipping Creation of New Global Service, Named= ", globalSvcName, " already exists")
-		log.Info("Checking if the Spec is synced.")
+		log.Info("Checking if the Spec is synced. [Currently only checks for ports.]")
 		targetSvcPort := targetSvc.Spec.Ports
 		globalSvcPort := globalSvc.Spec.Ports
 		if !reflect.DeepEqual(targetSvcPort, globalSvcPort) {
 			//Check port by port, to make sure there is no change.
 			//Create map to do efficient checking
-			log.Info("Looks like there is difference in Ports ", "TargetSvcPort= ", targetSvcPort, " GlobalSvcPort=", globalSvcPort, " syncing config.")
+			log.Debug("Looks like there is difference in Ports ", "TargetSvcPort= ", targetSvcPort, " GlobalSvcPort=", globalSvcPort, " syncing config.")
 			mapPort := make(map[corev1.ServicePort]corev1.ServicePort)
 			for _, port := range globalSvcPort {
 				mapPort[port] = corev1.ServicePort{}
@@ -136,7 +139,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 
 			//Again make sure there is change in ports if there is change, update the ports.
 			//Checking now it should return true.
-			if reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
+			if !reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
 				//Only update ports.
 				defaultCreateOptions := metav1.CreateOptions{}
 
@@ -152,6 +155,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 				if err != nil {
 					log.Error("Unable to update ports, for global service ", "name=", globalSvcName)
 					log.Error(err)
+					return
 				}
 			}
 		}
