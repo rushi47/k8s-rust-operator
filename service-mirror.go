@@ -33,13 +33,13 @@ func getServiceFilter(ctx Context) labels.Selector {
 	*/
 	mirrorSvcLabel, err := labels.NewRequirement("mirror.linkerd.io/mirrored-service", selection.Equals, []string{"true"})
 	if err != nil {
-		ctx.log.Errorln("Unable to generate error requirement", "Err", err.Error())
+		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
 	}
 
 	// Create label requirements for "mirror.linkerd.io/headless-mirror-svc-name" not existing
 	mirrorSvcParentLabel, err := labels.NewRequirement("mirror.linkerd.io/headless-mirror-svc-name", selection.DoesNotExist, []string{})
 	if err != nil {
-		ctx.log.Errorln("Unable to generate error requirement", "Err", err.Error())
+		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
 	}
 
 	// Create the label selector
@@ -62,10 +62,10 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 
 	service, ok := obj.(*corev1.Service)
 	if !ok {
-		log.Errorln("Failed to cast object to Service type")
+		log.Errorf("Failed to cast object to Service type")
 		return
 	}
-	log.Info("New Target Service Added ", "svcName= ", service.Name)
+	log.Infof("New Target Service Added, svcName= %v", service.Name)
 
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
 
@@ -76,7 +76,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 	// TO DO: Add global object in local cache.
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
-	log.Info("Checking global Svc Named = ", globalSvcName, " if exists")
+	log.Infof("Checking global Svc Named = %v  if exists", globalSvcName)
 	globalSvc, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
@@ -87,7 +87,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 			Which will be aggregator for mirrored services from targetSvc. cluster x-targetSvc.0, x-targetSvc.1
 			Global service will always be created in Default.
 		*/
-		log.Info("New Global Service will be created.", "Name=", globalSvcName)
+		log.Infof("New Global Service will be created Name=%v", globalSvcName)
 
 		svcMeta := &metav1.ObjectMeta{
 			Name:      globalSvcName,
@@ -109,15 +109,15 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 		defaultCreateOptions := metav1.CreateOptions{}
 		_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Create(context.Background(), globalService, defaultCreateOptions)
 		if !apiError.IsAlreadyExists(err) && err != nil {
-			log.Error("Issue with service creation", "name=", globalSvcName)
+			log.Errorf("Issue with service creation, Name=%v", globalSvcName)
 			log.Error(err)
 			return
 		}
 
 	} else {
 		// If service already exists, check if the port from the target service are inside global svc.
-		log.Debug("Skipping Creation of New Global Service, Named= ", globalSvcName, " already exists")
-		log.Info("Checking if the Spec is synced. [Currently only checks for ports.]")
+		log.Debugf("Skipping Creation of New Global Service, Named=%v already exists", globalSvcName)
+		log.Infof("Checking if the Spec is synced. [Currently only checks for ports.]")
 		targetSvcPort := targetSvc.Spec.Ports
 		globalSvcPort := globalSvc.Spec.Ports
 		if !reflect.DeepEqual(targetSvcPort, globalSvcPort) {
@@ -132,7 +132,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 			log.Debugf("Value of global svc ports after removing name : %v", mapPort)
 			for _, port := range targetSvcPort {
 				if _, ok := mapPort[port]; !ok {
-					log.Info("Port= ", port, " doesn't exist in global. Adding.")
+					log.Infof("Port= %v doesn't exist in global. Adding.", port)
 					globalSvcPort = append(globalSvcPort, *port.DeepCopy())
 				}
 			}
@@ -141,7 +141,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 			//Checking now it should return true.
 			if !reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
 				//Only update ports.
-				log.Debug("Looks like there is difference in Ports ", "NewPorts= ", globalSvcPort, " ExistingPorts=", globalSvc.Spec.Ports, " syncing config.")
+				log.Debugf("Looks like there is difference in Ports NewPorts=%v, ExistingPorts=%v  syncing config", globalSvcPort, globalSvc.Spec.Ports)
 
 				defaultCreateOptions := metav1.CreateOptions{}
 
@@ -155,7 +155,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 				globalSvc.Spec.Ports = globalSvcPort
 				_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 				if err != nil {
-					log.Error("Unable to update ports, for global service ", "name=", globalSvcName)
+					log.Errorf("Unable to update ports, for global service Name=%v", globalSvcName)
 					log.Error(err)
 					return
 				}
@@ -164,26 +164,26 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 
 	}
 
-	log.Info("Global Service with Name: ", globalSvcName, " should exist.")
+	log.Infof("Global Service with Name=%v  should exist.", globalSvcName)
 }
 
 // Function to handle service updates
 func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 	//If nothing has changed, return. https://github.com/kubernetes/client-go/issues/529
 	if reflect.DeepEqual(oldObj, newObj) {
-		ctx.log.Debug("Nothing has changed in object, skipping update.")
+		ctx.log.Debugf("Nothing has changed in object, skipping update.")
 		return
 	}
 
 	oldService, ok := oldObj.(*corev1.Service)
 	if !ok {
-		ctx.log.Errorln("Failed to cast old object to Service type")
+		ctx.log.Errorf("Failed to cast old object to Service type")
 		return
 	}
 	newService, ok := newObj.(*corev1.Service)
 
 	if !ok {
-		ctx.log.Errorln("Failed to cast new object to Service type")
+		ctx.log.Errorf("Failed to cast new object to Service type")
 		return
 	}
 
@@ -202,14 +202,14 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 		globalSvcName := strings.Split(newService.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 		globalSvcName = globalSvcName + "-global"
 
-		log.Info("Checking global Svc Named = ", globalSvcName, " if exists")
+		log.Infof("Checking global Svc Named=%v if exists", globalSvcName)
 
 		globalSvc, err := client.CoreV1().Services("default").Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 		if !apiError.IsAlreadyExists(err) && err != nil {
-			log.Error("Issue in retrieving global svc", "Name=", globalSvcName)
+			log.Errorf("Issue in retrieving global svc Name=%v", globalSvcName)
 			log.Error(err)
-			log.Info("Skipping update for now.")
+			log.Infof("Skipping update for now.")
 			return
 		}
 
@@ -218,7 +218,7 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 		if !reflect.DeepEqual(targetSvcPort, globalSvcPort) {
 			//Check port by port, to make sure there is no change.
 			//Create map to do efficient checking
-			log.Info("Looks like there is difference in Ports ", "TargetSvcPort= ", targetSvcPort, " GlobalSvcPort=", globalSvcPort, " syncing config.")
+			log.Infof("Looks like there is difference in Ports TargetSvcPort= %v GlobalSvcPort=%v syncing config", targetSvcPort, globalSvcPort)
 			mapPort := make(map[corev1.ServicePort]corev1.ServicePort)
 			for _, port := range globalSvcPort {
 				//Target svc ports some times are nil so removing name here to make sure it matches
@@ -230,7 +230,7 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 				//Target svc ports some times are nil so removing name here to make sure it matches
 				port.Name = ""
 				if _, ok := mapPort[port]; !ok {
-					log.Info("Port= ", port, " doesn't exist in global. Adding.")
+					log.Infof("Port= %v doesn't exist in global. Adding.", port)
 					//TO DO : Currently just adds new port, make sure that even remove unused ports.
 					//There could be the case that service which is not being updated now, is using the same port.
 					globalSvcPort = append(globalSvcPort, *port.DeepCopy())
@@ -238,7 +238,7 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 			}
 
 			if !reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
-				log.Debug("Looks like there is difference in Ports ", "NewPorts= ", globalSvcPort, " ExistingPorts=", globalSvc.Spec.Ports, " syncing config.")
+				log.Debugf("Looks like there is difference in Ports ", "NewPorts=%v, ExistingPorts=%v  syncing config.", globalSvcPort, globalSvc.Spec.Ports)
 				//Only update ports.
 				defaultCreateOptions := metav1.CreateOptions{}
 
@@ -251,17 +251,16 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 				//Update all the ports, cause its addition.
 				globalSvc.Spec.Ports = globalSvcPort
 				//Again make sure there is change in ports and its different from new service.
-				log.Debug("Updated Global service  : ", "Ports to update=", globalSvcPort)
-				log.Debug(globalSvc.Spec.Ports)
+				log.Debugf("Updated Global service, Ports to update=%v, existing ports=%v", globalSvcPort, globalSvc.Spec.Ports)
 				_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 				if err != nil {
-					log.Error("Unable to update ports, for global service ", "name=", globalSvcName)
+					log.Errorf("Unable to update ports, for global service, Name=%v", globalSvcName)
 					log.Error(err)
 				}
 			}
 		}
 
-		ctx.log.Info("New service resource version =  \n", newService.Name)
+		ctx.log.Infof("New service resource version =  %v ", newService.Name)
 
 	}
 }
@@ -269,7 +268,7 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 func handleServiceDelete(ctx *Context, obj interface{}) {
 	service, ok := obj.(*corev1.Service)
 	if !ok {
-		ctx.log.Errorln("Failed to cast object to Service type")
+		ctx.log.Errorf("Failed to cast object to Service type")
 		return
 	}
 	log := ctx.log
@@ -277,13 +276,13 @@ func handleServiceDelete(ctx *Context, obj interface{}) {
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
 	_, err := ctx.client.CoreV1().Services("").List(ctx.ctx, metav1.ListOptions{LabelSelector: targetClusterame})
 	if err != nil {
-		log.Error("Unable to list services  for label: ", targetClusterame)
+		log.Errorf("Unable to list services  for label: %v", targetClusterame)
 		log.Error(err)
 		return
 	}
 
 	//TO DO : Make sure if all the services are deleted for cluster, global service is also deleted.
-	log.Info("Service being Deleted,  ", service.Name)
+	log.Infof("Service being Deleted Name=%v ", service.Name)
 }
 
 func getSharedInformer(ctx Context, svcFilter labels.Selector) cache.SharedInformer {
@@ -346,7 +345,7 @@ func main() {
 	//Shows line number: Too long
 	// log.SetReportCaller(true)
 
-	log.Infof("Starting Global Mirror")
+	log.Info("Starting Global Mirror")
 
 	var kubeconfig *string
 	if home := homedir.HomeDir(); home != "" {
@@ -358,13 +357,13 @@ func main() {
 	// use the current context in kubeconfig
 	config, err := client.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		log.Panicf("Probably running Inside Cluster :%s", err.Error())
+		log.Panicf("Probably running Inside Cluster :%v", err.Error())
 	}
 
 	// creates the clientset
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Panicf("Issue in building client from config : %s", err.Error())
+		log.Panicf("Issue in building client from config : %v", err.Error())
 	}
 
 	//Create context
@@ -396,7 +395,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Errorf("Unable to get running services for filter : %s, Error: %s", svcFilter.String(), err.Error())
+		log.Errorf("Unable to get running services for filter : %v, Error: %v", svcFilter.String(), err.Error())
 	}
 
 	// Run the program indefinitely
