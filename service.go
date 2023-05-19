@@ -152,7 +152,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 			Which will be aggregator for mirrored services from targetSvc. cluster x-targetSvc.0, x-targetSvc.1
 			Global service will always be created in Default.
 		*/
-		log.Infof("New Global Service will be created Name=%v", globalSvcName)
+		log.Infof("New Global Service will be created Name=%v in Namespace=%v", globalSvcName, svc.namespace)
 
 		svcMeta := &metav1.ObjectMeta{
 			Name:      globalSvcName,
