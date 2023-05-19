@@ -23,10 +23,13 @@ type Context struct {
 	client kubernetes.Clientset
 }
 
+// Struct to build service watcher which looks after target services.
 type ServiceWatcher struct {
 	ctx       Context
 	svcFilter labels.Selector
 	informer  cache.SharedInformer
+	// Name space where to install service watcher,
+	namespace string
 }
 
 type GlobalServiceMirrorInformers struct {
@@ -36,12 +39,13 @@ type GlobalServiceMirrorInformers struct {
 	// epInformer cache.ResourceEventHandler
 }
 
-func NewServiceWatcher(ctx Context) ServiceWatcher {
+func NewServiceWatcher(ctx Context, ns string) ServiceWatcher {
 	svc := &ServiceWatcher{
 		ctx: ctx,
 	}
 	svc.svcFilter = svc.createServiceFilter()
 	svc.informer = svc.createSharedInformer()
+	svc.namespace = ns
 	return *svc
 }
 
@@ -66,6 +70,9 @@ func main() {
 	if home := homedir.HomeDir(); home != "" {
 		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	}
+
+	//Specify the NameSpace for install controller & global svc.
+	globalSvcNs := *flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
 
 	flag.Parse()
 
@@ -92,7 +99,7 @@ func main() {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	svcWatcher := NewServiceWatcher(*ctx)
+	svcWatcher := NewServiceWatcher(*ctx, globalSvcNs)
 
 	//Build global informer
 	globaMirrorInformer := GlobalServiceMirrorInformers{

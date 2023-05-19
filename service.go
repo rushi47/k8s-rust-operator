@@ -142,7 +142,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
 	log.Infof("Checking global Svc Named = %v  if exists", globalSvcName)
-	globalSvc, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Get(context.Background(), globalSvcName, metav1.GetOptions{})
+	globalSvc, err := client.CoreV1().Services(svc.namespace).Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
 	if err != nil && !apiError.IsAlreadyExists(err) {
@@ -172,7 +172,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 		}
 		//Create clientSet to create Service,
 		defaultCreateOptions := metav1.CreateOptions{}
-		_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Create(context.Background(), globalService, defaultCreateOptions)
+		_, err := client.CoreV1().Services(svc.namespace).Create(context.Background(), globalService, defaultCreateOptions)
 		if !apiError.IsAlreadyExists(err) && err != nil {
 			log.Errorf("Issue with service creation, Name=%v", globalSvcName)
 			log.Error(err)
@@ -188,7 +188,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 			// Update all the ports, cause its addition.
 			globalSvc.Spec.Ports = globalSvcPort
 			defaultCreateOptions := metav1.CreateOptions{}
-			_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
+			_, err := client.CoreV1().Services(svc.namespace).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 			if err != nil {
 				log.Errorf("Unable to update ports, for global service Name=%v", globalSvcName)
 				log.Error(err)
@@ -255,7 +255,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 			defaultCreateOptions := metav1.CreateOptions{}
 			//Again make sure there is change in ports and its different from new service.
 			log.Debugf("Updating Global service, Ports to update=%v, existing ports=%v", globalSvcPort, globalSvc.Spec.Ports)
-			_, err := client.CoreV1().Services(GLOBAL_SVC_NAMESPACE).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
+			_, err := client.CoreV1().Services(svc.namespace).Update(ctx.ctx, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 			if err != nil {
 				log.Errorf("Unable to update ports, for global service, Name=%v", globalSvcName)
 				log.Error(err)
@@ -263,7 +263,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 		}
 
 	}
-	log.Info("Handle update for service : %v", newService.Name)
+	log.Infof("Handled update for service : %v", newService.Name)
 }
 
 func (svc *ServiceWatcher) handleServiceDelete(obj interface{}) {
