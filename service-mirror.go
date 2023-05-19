@@ -129,7 +129,7 @@ func handleServiceAdd(ctx *Context, obj interface{}) {
 				mapPort[port] = corev1.ServicePort{}
 				mapPort[port] = port
 			}
-
+			log.Debugf("Value of global svc ports after removing name : %v", mapPort)
 			for _, port := range targetSvcPort {
 				if _, ok := mapPort[port]; !ok {
 					log.Info("Port= ", port, " doesn't exist in global. Adding.")
@@ -221,10 +221,14 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 			log.Info("Looks like there is difference in Ports ", "TargetSvcPort= ", targetSvcPort, " GlobalSvcPort=", globalSvcPort, " syncing config.")
 			mapPort := make(map[corev1.ServicePort]corev1.ServicePort)
 			for _, port := range globalSvcPort {
+				//Target svc ports some times are nil so removing name here to make sure it matches
+				port.Name = ""
 				mapPort[port] = port
 			}
-
+			log.Debugf("Value of global svc ports after removing name : %v", mapPort)
 			for _, port := range targetSvcPort {
+				//Target svc ports some times are nil so removing name here to make sure it matches
+				port.Name = ""
 				if _, ok := mapPort[port]; !ok {
 					log.Info("Port= ", port, " doesn't exist in global. Adding.")
 					//TO DO : Currently just adds new port, make sure that even remove unused ports.
@@ -234,6 +238,7 @@ func handleServiceUpdate(ctx *Context, oldObj, newObj interface{}) {
 			}
 
 			if !reflect.DeepEqual(globalSvcPort, globalSvc.Spec.Ports) {
+				log.Debug("Looks like there is difference in Ports ", "NewPorts= ", globalSvcPort, " ExistingPorts=", globalSvc.Spec.Ports, " syncing config.")
 				//Only update ports.
 				defaultCreateOptions := metav1.CreateOptions{}
 
