@@ -153,6 +153,13 @@ install-testset: && set-context
 
    cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source apply -f -
 
+#Delete testset
+delete-testset:
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target1 delete -f -
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target2 delete -f -
+
+   cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source delete -f -
+
 #Set kubectl context to source
 set-context:
    kubectl config use-context k3d-source
