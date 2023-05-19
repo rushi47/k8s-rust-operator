@@ -148,11 +148,8 @@ link-mc: && install-testset
 
 #Install 2 statefulset in target1 & target2 multicluster & dnsutil for testing in source
 install-testset: && set-context
-   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-target1 apply -f -
-   cat bootstrap-scripts/nginx-statefulset.yaml | kubectl --context=k3d-target2 apply -f -
-
-   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-target1 apply -f -
-   cat bootstrap-scripts/redis-statefulset.yaml | kubectl --context=k3d-target2 apply -f -
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target1 apply -f -
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target2 apply -f -
 
    cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source apply -f -
 
