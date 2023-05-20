@@ -11,7 +11,7 @@ fmt:
 
 #Will run the controller
 run:
-   go run service-mirror.go
+   go run *.go
 
 # This will not work as we need to create multicluster, sticking to create script for now. 
 export K3D_ORG_DOMAIN := env_var_or_default("K3D_ORG_DOMAIN", "cluster.local")
