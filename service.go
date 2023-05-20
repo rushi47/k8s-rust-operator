@@ -17,6 +17,26 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+// Struct to build service watcher which looks after target services.
+type ServiceWatcher struct {
+	ctx       Context
+	svcFilter labels.Selector
+	informer  cache.SharedInformer
+	// Name space where to install service watcher,
+	namespace string
+}
+
+// Build new service watcher
+func NewServiceWatcher(ctx Context, ns *string) ServiceWatcher {
+	svc := &ServiceWatcher{
+		ctx: ctx,
+	}
+	svc.svcFilter = svc.createServiceFilter()
+	svc.informer = svc.createSharedInformer()
+	svc.namespace = *ns
+	return *svc
+}
+
 func (svc *ServiceWatcher) checkIfNameSpaceExists() {
 
 	// Check if the namespace already exists
@@ -25,7 +45,7 @@ func (svc *ServiceWatcher) checkIfNameSpaceExists() {
 	namespace := svc.namespace
 	_, err := client.CoreV1().Namespaces().Get(svc.ctx.ctx, namespace, metav1.GetOptions{})
 	if apiError.IsAlreadyExists(err) {
-		log.Printf("Namespace '%s' already exists", namespace)
+		log.Debugf("Namespace '%s' already exists", namespace)
 		return
 	} else {
 		// Create the namespace

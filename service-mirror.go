@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	client "k8s.io/client-go/tools/clientcmd"
@@ -23,30 +22,11 @@ type Context struct {
 	client kubernetes.Clientset
 }
 
-// Struct to build service watcher which looks after target services.
-type ServiceWatcher struct {
-	ctx       Context
-	svcFilter labels.Selector
-	informer  cache.SharedInformer
-	// Name space where to install service watcher,
-	namespace string
-}
-
 type GlobalServiceMirrorInformers struct {
 	//Service handle rinformer
 	svcInformer cache.SharedInformer
 	//Endpoint handler informer
 	// epInformer cache.ResourceEventHandler
-}
-
-func NewServiceWatcher(ctx Context, ns *string) ServiceWatcher {
-	svc := &ServiceWatcher{
-		ctx: ctx,
-	}
-	svc.svcFilter = svc.createServiceFilter()
-	svc.informer = svc.createSharedInformer()
-	svc.namespace = *ns
-	return *svc
 }
 
 func main() {
