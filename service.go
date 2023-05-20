@@ -17,6 +17,31 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+func (svc *ServiceWatcher) checkIfNameSpaceExists() {
+
+	// Check if the namespace already exists
+	client := svc.ctx.client
+	log := svc.ctx.log
+	namespace := svc.namespace
+	_, err := client.CoreV1().Namespaces().Get(svc.ctx.ctx, namespace, metav1.GetOptions{})
+	if apiError.IsAlreadyExists(err) {
+		log.Printf("Namespace '%s' already exists", namespace)
+		return
+	} else {
+		// Create the namespace
+		newNamespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: namespace,
+			},
+		}
+		_, err := client.CoreV1().Namespaces().Create(svc.ctx.ctx, newNamespace, metav1.CreateOptions{})
+		if err != nil {
+			log.Errorf("Issue creating namesapce : %v", err.Error())
+		}
+
+		log.Infof("Namespace '%s' created", namespace)
+	}
+}
 func (svc *ServiceWatcher) createServiceFilter() labels.Selector {
 	/* Get running services in all the names, labelled with "mirror.linkerd.io/mirrored-service: true"
 	and which service which does have label : mirror.linkerd.io/headless-mirror-svc-name. Build selector for it.
@@ -152,11 +177,12 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 			Which will be aggregator for mirrored services from targetSvc. cluster x-targetSvc.0, x-targetSvc.1
 			Global service will always be created in Default.
 		*/
+		svc.checkIfNameSpaceExists()
 		log.Infof("New Global Service will be created Name=%v in Namespace=%v", globalSvcName, svc.namespace)
 
 		svcMeta := &metav1.ObjectMeta{
 			Name:      globalSvcName,
-			Namespace: targetSvc.Namespace,
+			Namespace: svc.namespace,
 			Labels: map[string]string{
 				"mirror.linkerd.io/global-mirror-for": targetClusterame,
 			},

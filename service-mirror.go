@@ -39,13 +39,13 @@ type GlobalServiceMirrorInformers struct {
 	// epInformer cache.ResourceEventHandler
 }
 
-func NewServiceWatcher(ctx Context, ns string) ServiceWatcher {
+func NewServiceWatcher(ctx Context, ns *string) ServiceWatcher {
 	svc := &ServiceWatcher{
 		ctx: ctx,
 	}
 	svc.svcFilter = svc.createServiceFilter()
 	svc.informer = svc.createSharedInformer()
-	svc.namespace = ns
+	svc.namespace = *ns
 	return *svc
 }
 
@@ -72,7 +72,7 @@ func main() {
 	}
 
 	//Specify the NameSpace for install controller & global svc.
-	globalSvcNs := *flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
+	globalSvcNs := flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
 
 	flag.Parse()
 
