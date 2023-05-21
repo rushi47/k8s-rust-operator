@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apiError "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,21 +20,22 @@ import (
 
 // Struct to build service watcher which looks after target services.
 type ServiceWatcher struct {
-	ctx       Context
-	svcFilter labels.Selector
-	informer  cache.SharedInformer
-	// Name space where to install service watcher,
-	namespace string
+	GlobalWatcher
+	log *logrus.Entry
 }
 
 // Build new service watcher
 func NewServiceWatcher(ctx Context, ns *string) ServiceWatcher {
 	svc := &ServiceWatcher{
-		ctx: ctx,
+		GlobalWatcher: GlobalWatcher{
+			ctx: ctx,
+		},
 	}
-	svc.svcFilter = svc.createServiceFilter()
+	svc.Filter = svc.createServiceFilter()
 	svc.informer = svc.createSharedInformer()
 	svc.namespace = *ns
+	//Clear distinguish between log
+	svc.log = svc.ctx.log.WithField("[logger]", "service")
 	return *svc
 }
 
@@ -41,7 +43,7 @@ func (svc *ServiceWatcher) checkIfNameSpaceExists() {
 
 	// Check if the namespace already exists
 	client := svc.ctx.client
-	log := svc.ctx.log
+	log := svc.log
 	namespace := svc.namespace
 	_, err := client.CoreV1().Namespaces().Get(svc.ctx.ctx, namespace, metav1.GetOptions{})
 	if apiError.IsAlreadyExists(err) {
@@ -66,16 +68,15 @@ func (svc *ServiceWatcher) createServiceFilter() labels.Selector {
 	/* Get running services in all the names, labelled with "mirror.linkerd.io/mirrored-service: true"
 	and which service which does have label : mirror.linkerd.io/headless-mirror-svc-name. Build selector for it.
 	*/
-	ctx := svc.ctx
 	mirrorSvcLabel, err := labels.NewRequirement("mirror.linkerd.io/mirrored-service", selection.Equals, []string{"true"})
 	if err != nil {
-		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
+		svc.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
 	}
 
 	// Create label requirements for "mirror.linkerd.io/headless-mirror-svc-name" not existing
 	mirrorSvcParentLabel, err := labels.NewRequirement("mirror.linkerd.io/headless-mirror-svc-name", selection.DoesNotExist, []string{})
 	if err != nil {
-		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
+		svc.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
 	}
 
 	// Create the label selector
@@ -88,7 +89,7 @@ func (svc *ServiceWatcher) createServiceFilter() labels.Selector {
 
 func (svc *ServiceWatcher) createSharedInformer() cache.SharedInformer {
 	ctx := svc.ctx
-	svcFilter := svc.svcFilter
+	svcFilter := svc.Filter
 	//Get enformer and add event handler
 	informer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
@@ -119,7 +120,7 @@ func (svc *ServiceWatcher) checkParityofService(targetSvc *corev1.Service, globa
 
 	targetSvcPort := targetSvc.Spec.Ports
 	globalSvcPort := globalSvc.Spec.Ports
-	log := svc.ctx.log
+	log := svc.log
 	if !reflect.DeepEqual(targetSvcPort, globalSvcPort) {
 		//Check port by port, to make sure there is no change.
 		//Create map to do efficient checking
@@ -166,7 +167,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 
 	*/
 	ctx := svc.ctx
-	log := ctx.log
+	log := svc.log
 	client := ctx.client
 
 	service, ok := obj.(*corev1.Service)
@@ -250,22 +251,22 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 // Function to handle service updates
 func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 	ctx := svc.ctx
-	log := ctx.log
+	log := svc.log
 
 	//If nothing has changed, return. https://github.com/kubernetes/client-go/issues/529
 	if reflect.DeepEqual(oldObj, newObj) {
-		ctx.log.Debugf("Nothing has changed in object, skipping update.")
+		svc.log.Debugf("Nothing has changed in object, skipping update.")
 		return
 	}
 
 	oldService, ok := oldObj.(*corev1.Service)
 	if !ok {
-		ctx.log.Errorf("Failed to cast old object to Service type")
+		svc.log.Errorf("Failed to cast old object to Service type")
 		return
 	}
 	newService, ok := newObj.(*corev1.Service)
 	if !ok {
-		ctx.log.Errorf("Failed to cast new object to Service type")
+		svc.log.Errorf("Failed to cast new object to Service type")
 		return
 	}
 
@@ -278,7 +279,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 
 		// Assuming global/aggregator service exists.
 		// TO DO: Also add logic to handle
-		log := ctx.log
+		log := svc.log
 		client := ctx.client
 		globalSvcName := strings.Split(newService.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 		globalSvcName = globalSvcName + "-global"
@@ -315,12 +316,12 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 func (svc *ServiceWatcher) handleServiceDelete(obj interface{}) {
 	ctx := svc.ctx
 	service, ok := obj.(*corev1.Service)
-	log := ctx.log
+	log := svc.log
 
 	log.Infof("Handling Delete for Service : %v ", service.Name)
 
 	if !ok {
-		ctx.log.Errorf("Failed to cast object to Service type")
+		svc.log.Errorf("Failed to cast object to Service type")
 		return
 	}
 

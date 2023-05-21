@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	client "k8s.io/client-go/tools/clientcmd"
@@ -22,11 +23,20 @@ type Context struct {
 	client kubernetes.Clientset
 }
 
+// Global Watch it can be of type either Service or EndpointSlice
+type GlobalWatcher struct {
+	ctx      Context
+	Filter   labels.Selector
+	informer cache.SharedInformer
+	// Name space where to install service watcher,
+	namespace string
+}
+
 type GlobalServiceMirrorInformers struct {
 	//Service handle rinformer
 	svcInformer cache.SharedInformer
 	//Endpoint handler informer
-	// epInformer cache.ResourceEventHandler
+	epInformer cache.SharedInformer
 }
 
 func main() {
@@ -79,17 +89,26 @@ func main() {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
+	//Watcher for Target Services
 	svcWatcher := NewServiceWatcher(*ctx, globalSvcNs)
+
+	//Watcher for EndpointSlices of target Services
+	epsWatcher := NewEndpointSlicesWatcher(*ctx, globalSvcNs)
 
 	//Build global informer
 	globaMirrorInformer := GlobalServiceMirrorInformers{
 		svcInformer: svcWatcher.informer,
+		epInformer:  epsWatcher.informer,
 	}
 
+	//Spint up Informer to run in thread
 	go globaMirrorInformer.svcInformer.Run(stopCh)
 
+	//Spin up endpoint informer in different thread
+	go globaMirrorInformer.epInformer.Run(stopCh)
+
 	// Wait until the informer is synced
-	if !cache.WaitForCacheSync(stopCh, globaMirrorInformer.svcInformer.HasSynced) {
+	if !cache.WaitForCacheSync(stopCh, globaMirrorInformer.svcInformer.HasSynced, globaMirrorInformer.epInformer.HasSynced) {
 		log.Panicln("Failed to sync informer cache")
 	}
 
