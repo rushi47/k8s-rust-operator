@@ -44,19 +44,23 @@ func (svc *ServiceWatcher) checkIfNameSpaceExists() {
 	log := svc.ctx.log
 	namespace := svc.namespace
 	_, err := client.CoreV1().Namespaces().Get(svc.ctx.ctx, namespace, metav1.GetOptions{})
-	if apiError.IsAlreadyExists(err) {
-		log.Debugf("Namespace '%s' already exists", namespace)
+    if err != nil {
+        if apiError.IsAlreadyExists(err) {
+		      log.Debugf("Skipped creating namespace '%s'; already exists", namespace)
+		      return
+		}
+		log.Errorf("Failed to get namespace '%s': %v", err)
 		return
-	} else {
-		// Create the namespace
-		newNamespace := &corev1.Namespace{
+	} 
+     // Create the namespace
+	newNamespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: namespace,
 			},
 		}
 		_, err := client.CoreV1().Namespaces().Create(svc.ctx.ctx, newNamespace, metav1.CreateOptions{})
 		if err != nil {
-			log.Errorf("Issue creating namesapce : %v", err.Error())
+			log.Errorf("Issue creating namespace : %v", err.Error())
 		}
 
 		log.Infof("Namespace '%s' created", namespace)
