@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	ctx "context"
 	"flag"
 	"os"
 	"path/filepath"
@@ -17,16 +18,13 @@ import (
 const GLOBAL_SVC_NAMESPACE = "default"
 
 type Context struct {
-	ctx    context.Context
-	log    logrus.Logger
-	client kubernetes.Clientset
+	ctx.Context
+	kubernetes.Clientset
 }
 
-type GlobalServiceMirrorInformers struct {
-	//Service handle rinformer
-	svcInformer cache.SharedInformer
-	//Endpoint handler informer
-	// epInformer cache.ResourceEventHandler
+type Watcher struct {
+	//Various informers like Service, EndpointSlice.
+	informers []cache.SharedInformer
 }
 
 func main() {
@@ -70,29 +68,30 @@ func main() {
 
 	//Create context
 	ctx := &Context{
-		ctx:    context.TODO(),
-		log:    *log,
-		client: *client,
+		context.TODO(),
+		*client,
 	}
 
 	//Make sure it runs in loop.
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	svcWatcher := NewServiceWatcher(*ctx, globalSvcNs)
+	svcWatcher := NewServiceWatcher(*ctx, log, globalSvcNs)
 
-	//Build global informer
-	globaMirrorInformer := GlobalServiceMirrorInformers{
-		svcInformer: svcWatcher.informer,
+	watcher := &Watcher{}
+	watcher.informers = append(watcher.informers, svcWatcher.informer)
+
+	//Run all the informers
+	for _, informer := range watcher.informers {
+		go informer.Run(stopCh)
 	}
 
-	go globaMirrorInformer.svcInformer.Run(stopCh)
-
-	// Wait until the informer is synced
-	if !cache.WaitForCacheSync(stopCh, globaMirrorInformer.svcInformer.HasSynced) {
-		log.Panicln("Failed to sync informer cache")
+	//Make sure cache is synced.
+	for _, informer := range watcher.informers {
+		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
+			log.Panicln("Failed to sync informer cache")
+		}
 	}
-
 	// Run the program indefinitely
 	<-stopCh
 }
