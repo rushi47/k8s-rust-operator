@@ -65,7 +65,7 @@ func main() {
 	// creates the clientset
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Panicf("Issue in building client from config : %v", err.Error())
+		log.Panicf("Issue in building client from config: %v", err)
 	}
 
 	//Create context

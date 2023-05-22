@@ -22,7 +22,7 @@ type ServiceWatcher struct {
 	ctx       Context
 	svcFilter labels.Selector
 	informer  cache.SharedInformer
-	// Name space where to install service watcher,
+	// Name space to run watcher & mirror services.
 	namespace string
 }
 
@@ -37,35 +37,35 @@ func NewServiceWatcher(ctx Context, ns *string) ServiceWatcher {
 	return *svc
 }
 
-func (svc *ServiceWatcher) checkIfNameSpaceExists() {
+func (svc *ServiceWatcher) checkNameSpaceExists() {
 
 	// Check if the namespace already exists
 	client := svc.ctx.client
 	log := svc.ctx.log
 	namespace := svc.namespace
 	_, err := client.CoreV1().Namespaces().Get(svc.ctx.ctx, namespace, metav1.GetOptions{})
-    if err != nil {
-        if apiError.IsAlreadyExists(err) {
-		      log.Debugf("Skipped creating namespace '%s'; already exists", namespace)
-		      return
+	if err != nil {
+		if apiError.IsAlreadyExists(err) {
+			log.Debugf("Skipped creating namespace '%s'; already exists", namespace)
+			return
 		}
 		log.Errorf("Failed to get namespace '%s': %v", err)
 		return
-	} 
-     // Create the namespace
-	newNamespace := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: namespace,
-			},
-		}
-		_, err := client.CoreV1().Namespaces().Create(svc.ctx.ctx, newNamespace, metav1.CreateOptions{})
-		if err != nil {
-			log.Errorf("Issue creating namespace : %v", err.Error())
-		}
-
-		log.Infof("Namespace '%s' created", namespace)
 	}
+	// Create the namespace
+	newNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+		},
+	}
+	_, err = client.CoreV1().Namespaces().Create(svc.ctx.ctx, newNamespace, metav1.CreateOptions{})
+	if err != nil {
+		log.Errorf("Issue creating namespace: %v", err)
+	}
+
+	log.Infof("Namespace '%s' created", namespace)
 }
+
 func (svc *ServiceWatcher) createServiceFilter() labels.Selector {
 	/* Get running services in all the names, labelled with "mirror.linkerd.io/mirrored-service: true"
 	and which service which does have label : mirror.linkerd.io/headless-mirror-svc-name. Build selector for it.
@@ -73,13 +73,13 @@ func (svc *ServiceWatcher) createServiceFilter() labels.Selector {
 	ctx := svc.ctx
 	mirrorSvcLabel, err := labels.NewRequirement("mirror.linkerd.io/mirrored-service", selection.Equals, []string{"true"})
 	if err != nil {
-		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
+		ctx.log.Errorf("Unable to generate error requirement, Err: %v", err)
 	}
 
 	// Create label requirements for "mirror.linkerd.io/headless-mirror-svc-name" not existing
 	mirrorSvcParentLabel, err := labels.NewRequirement("mirror.linkerd.io/headless-mirror-svc-name", selection.DoesNotExist, []string{})
 	if err != nil {
-		ctx.log.Errorf("Unable to generate error requirement, Err : %v", err.Error())
+		ctx.log.Errorf("Unable to generate error requirement, Err: %v", err)
 	}
 
 	// Create the label selector
@@ -133,7 +133,7 @@ func (svc *ServiceWatcher) checkParityofService(targetSvc *corev1.Service, globa
 			mapPort[port] = corev1.ServicePort{}
 			mapPort[port] = port
 		}
-		// log.Debugf("Value of global svc ports after removing name : %v", mapPort)
+		// log.Debugf("Value of global svc ports after removing name: %v", mapPort)
 		for _, port := range targetSvcPort {
 			if _, ok := mapPort[port]; !ok {
 				log.Infof("Port= %v doesn't exist in global. Adding.", port)
@@ -174,7 +174,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 	client := ctx.client
 
 	service, ok := obj.(*corev1.Service)
-	log.Infof("Handling Add for Service : %v ", service.Name)
+	log.Infof("Handling Add for Service: %v ", service.Name)
 	if !ok {
 		log.Errorf("Failed to cast object to Service type")
 		return
@@ -190,7 +190,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 	// TO DO: Add global object in local cache.
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
-	log.Infof("Checking global Svc Named = %v  if exists", globalSvcName)
+	log.Infof("Checking global Svc Named= %v  if exists", globalSvcName)
 	globalSvc, err := client.CoreV1().Services(svc.namespace).Get(context.Background(), globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
@@ -201,7 +201,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 			Which will be aggregator for mirrored services from targetSvc. cluster x-targetSvc.0, x-targetSvc.1
 			Global service will always be created in Default.
 		*/
-		svc.checkIfNameSpaceExists()
+		svc.checkNameSpaceExists()
 		log.Infof("New Global Service will be created Name=%v in Namespace=%v", globalSvcName, svc.namespace)
 
 		svcMeta := &metav1.ObjectMeta{
@@ -273,7 +273,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	log.Infof("Handling update for Service : %v ", oldService.Name)
+	log.Infof("Handling update for Service: %v ", oldService.Name)
 
 	//Get target clusters.
 	targetClusterame := newService.GetLabels()["mirror.linkerd.io/cluster-name"]
@@ -313,7 +313,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 		}
 
 	}
-	log.Infof("Handled update for service : %v", newService.Name)
+	log.Infof("Handled update for service: %v", newService.Name)
 }
 
 func (svc *ServiceWatcher) handleServiceDelete(obj interface{}) {
@@ -321,7 +321,7 @@ func (svc *ServiceWatcher) handleServiceDelete(obj interface{}) {
 	service, ok := obj.(*corev1.Service)
 	log := ctx.log
 
-	log.Infof("Handling Delete for Service : %v ", service.Name)
+	log.Infof("Handling Delete for Service: %v ", service.Name)
 
 	if !ok {
 		ctx.log.Errorf("Failed to cast object to Service type")
