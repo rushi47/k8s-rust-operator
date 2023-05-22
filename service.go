@@ -20,7 +20,7 @@ import (
 // Struct to build service watcher which looks after target services.
 type ServiceWatcher struct {
 	Context
-	log       *logrus.Logger
+	log       *logrus.Entry
 	svcFilter labels.Selector
 	informer  cache.SharedInformer
 	// Name space to run watcher & mirror services.
@@ -31,7 +31,8 @@ type ServiceWatcher struct {
 func NewServiceWatcher(ctx Context, log *logrus.Logger, ns *string) ServiceWatcher {
 	svc := &ServiceWatcher{
 		Context: ctx,
-		log:     log,
+		//Add Field to logger to distinquish between each other
+		log: log.WithField("[logger]", "service"),
 	}
 	svc.svcFilter = svc.createServiceFilter()
 	svc.informer = svc.createSharedInformer()
