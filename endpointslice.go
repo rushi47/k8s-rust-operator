@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -171,7 +172,26 @@ func (eps *EndpointSliceWatcher) handleServiceAdd(obj interface{}) {
 
 // Handle endpointslice updates
 func (svc *EndpointSliceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
-	svc.log.Info("Got the the upadte for Endpointslice")
+	// Check if there is difference betweend endpoints and ports. If there is change
+	// Work on respective endpoint and port.
+	//If nothing has changed, return. https://github.com/kubernetes/client-go/issues/529
+	if !reflect.DeepEqual(oldObj, newObj) {
+		return
+	}
+
+	oldEndpoint := oldObj.(*discoveryv1.EndpointSlice)
+	newEndpoint := newObj.(*discoveryv1.EndpointSlice)
+
+	// Check if there is change in Endpoints
+	if !reflect.DeepEqual(oldEndpoint.Endpoints, newEndpoint.Endpoints) {
+		// Get the addresses, without hostname and the compare.
+		newEpAddresses := make([]discoveryv1.Endpoint, 4)
+		for _, addr := range newEndpoint.Endpoints {
+			newEpAddresses = append(newEpAddresses)
+		}
+
+	}
+
 }
 
 // Handle endpoitslice delete

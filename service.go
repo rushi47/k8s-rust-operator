@@ -255,18 +255,18 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 
 	//If nothing has changed, return. https://github.com/kubernetes/client-go/issues/529
 	if reflect.DeepEqual(oldObj, newObj) {
-		svc.log.Debugf("Nothing has changed in object, skipping update.")
+		log.Debugf("Nothing has changed in object, skipping update.")
 		return
 	}
 
 	oldService, ok := oldObj.(*corev1.Service)
 	if !ok {
-		svc.log.Errorf("Failed to cast old object to Service type")
+		log.Errorf("Failed to cast old object to Service type")
 		return
 	}
 	newService, ok := newObj.(*corev1.Service)
 	if !ok {
-		svc.log.Errorf("Failed to cast new object to Service type")
+		log.Errorf("Failed to cast new object to Service type")
 		return
 	}
 
@@ -279,7 +279,6 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 
 		// Assuming global/aggregator service exists.
 		// TO DO: Also add logic to handle
-		log := svc.log
 		client := ctx.client
 		globalSvcName := strings.Split(newService.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 		globalSvcName = globalSvcName + "-global"
