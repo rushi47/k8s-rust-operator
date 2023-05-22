@@ -59,7 +59,7 @@ func main() {
 	// use the current context in kubeconfig
 	config, err := client.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		log.Panicf("Probably running Inside Cluster :%v", err.Error())
+		log.Panicf("Probably running Inside Cluster: %v", err)
 	}
 
 	// creates the clientset
