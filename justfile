@@ -11,7 +11,7 @@ fmt:
 
 #Will run the controller
 run:
-   go run service-mirror.go
+   go run main.go
 
 # This will not work as we need to create multicluster, sticking to create script for now. 
 export K3D_ORG_DOMAIN := env_var_or_default("K3D_ORG_DOMAIN", "cluster.local")
@@ -152,6 +152,13 @@ install-testset: && set-context
    kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target2 apply -f -
 
    cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source apply -f -
+
+#Delete testset
+delete-testset:
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target1 delete -f -
+   kubectl kustomize bootstrap-scripts/  | kubectl --context=k3d-target2 delete -f -
+
+   cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source delete -f -
 
 #Set kubectl context to source
 set-context:
