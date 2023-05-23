@@ -19,7 +19,6 @@ import (
 )
 
 type EndpointSliceWatcher struct {
-	GlobalWatcher
 	log *logrus.Entry
 }
 

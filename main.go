@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	globalMirrorWatcher "github.com/rushi47/service-mirror-prototype/watcher"
 	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	client "k8s.io/client-go/tools/clientcmd"
@@ -17,26 +17,15 @@ import (
 // Make sure all global services lies in only one namespace.
 const GLOBAL_SVC_NAMESPACE = "default"
 
+// Create context
 type Context struct {
-	ctx    context.Context
-	log    logrus.Logger
-	client kubernetes.Clientset
+	context.Context
+	kubernetes.Clientset
 }
 
-// Global Watch it can be of type either Service or EndpointSlice
-type GlobalWatcher struct {
-	ctx      Context
-	Filter   labels.Selector
-	informer cache.SharedInformer
-	// Name space where to install service watcher,
-	namespace string
-}
-
-type GlobalServiceMirrorInformers struct {
-	//Service handle rinformer
-	svcInformer cache.SharedInformer
-	//Endpoint handler informer
-	epInformer cache.SharedInformer
+type Watcher struct {
+	//Various informers like Service, EndpointSlice.
+	Informers []cache.SharedInformer
 }
 
 func main() {
@@ -69,49 +58,36 @@ func main() {
 	// use the current context in kubeconfig
 	config, err := client.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		log.Panicf("Probably running Inside Cluster :%v", err.Error())
+		log.Panicf("Probably running Inside Cluster: %v", err)
 	}
 
 	// creates the clientset
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Panicf("Issue in building client from config : %v", err.Error())
-	}
-
-	//Create context
-	ctx := &Context{
-		ctx:    context.TODO(),
-		log:    *log,
-		client: *client,
+		log.Panicf("Issue in building client from config: %v", err)
 	}
 
 	//Make sure it runs in loop.
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	//Watcher for Target Services
-	svcWatcher := NewServiceWatcher(*ctx, globalSvcNs)
+	watcher := &Watcher{}
+	//Return the service watcher
+	svcWatcher := globalMirrorWatcher.NewServiceWatcher(context.Background(), client, log, globalSvcNs)
 
-	//Watcher for EndpointSlices of target Services
-	epsWatcher := NewEndpointSlicesWatcher(*ctx, globalSvcNs)
+	watcher.Informers = append(watcher.Informers, svcWatcher.Informer)
 
-	//Build global informer
-	globaMirrorInformer := GlobalServiceMirrorInformers{
-		svcInformer: svcWatcher.informer,
-		epInformer:  epsWatcher.informer,
+	//Run all the informers
+	for _, informer := range watcher.Informers {
+		go informer.Run(stopCh)
 	}
 
-	//Spint up Informer to run in thread
-	go globaMirrorInformer.svcInformer.Run(stopCh)
-
-	//Spin up endpoint informer in different thread
-	go globaMirrorInformer.epInformer.Run(stopCh)
-
-	// Wait until the informer is synced
-	if !cache.WaitForCacheSync(stopCh, globaMirrorInformer.svcInformer.HasSynced, globaMirrorInformer.epInformer.HasSynced) {
-		log.Panicln("Failed to sync informer cache")
+	//Make sure cache is synced.
+	for _, informer := range watcher.Informers {
+		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
+			log.Panicln("Failed to sync informer cache")
+		}
 	}
-
 	// Run the program indefinitely
 	<-stopCh
 }
