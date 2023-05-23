@@ -17,12 +17,6 @@ import (
 // Make sure all global services lies in only one namespace.
 const GLOBAL_SVC_NAMESPACE = "default"
 
-// Create context
-type Context struct {
-	context.Context
-	kubernetes.Clientset
-}
-
 type Watcher struct {
 	//Various informers like Service, EndpointSlice.
 	Informers []cache.SharedInformer
@@ -51,7 +45,7 @@ func main() {
 	}
 
 	//Specify the NameSpace for install controller & global svc.
-	globalSvcNs := flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
+	globalSvcNamespace := flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
 
 	flag.Parse()
 
@@ -72,20 +66,26 @@ func main() {
 	defer close(stopCh)
 
 	watcher := &Watcher{}
-	//Return the service watcher
-	svcWatcher := globalMirrorWatcher.NewServiceWatcher(context.Background(), client, log, globalSvcNs)
+	ctx := context.Background()
+	// Get the service watcher
+	svcWatcher := globalMirrorWatcher.NewServiceWatcher(ctx, client, log, globalSvcNamespace)
 
-	watcher.Informers = append(watcher.Informers, svcWatcher.Informer)
+	// Get the endpointslice watcher
+	epsWatcher := globalMirrorWatcher.NewEndpointSlicesWatcher(ctx, client, log, globalSvcNamespace)
+
+	//Add all the watcher
+	watcher.Informers = append(watcher.Informers, svcWatcher.Informer, epsWatcher.Informer)
 
 	//Run all the informers
 	for _, informer := range watcher.Informers {
 		go informer.Run(stopCh)
 	}
 
+	log.Info("Checking informer cache....")
 	//Make sure cache is synced.
 	for _, informer := range watcher.Informers {
 		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
-			log.Panicln("Failed to sync informer cache")
+			log.Error("Failed to sync informer cache")
 		}
 	}
 	// Run the program indefinitely

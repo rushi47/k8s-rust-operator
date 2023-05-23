@@ -36,7 +36,7 @@ func NewServiceWatcher(ctx context.Context, client *kubernetes.Clientset, log *l
 	svc := &ServiceWatcher{
 		Context:   ctx,
 		clientset: *client,
-		//Add Field to logger to distinquish between each other
+		// Distinguish between different loggers
 		log: log.WithField("[logger]", "service"),
 	}
 	svc.svcFilter = svc.createServiceFilter()
