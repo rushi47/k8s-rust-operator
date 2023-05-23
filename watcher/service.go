@@ -1,6 +1,8 @@
-package main
+// Package defines various watcher like Service and EndpointSlice
+package watcher
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,28 +16,31 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
 
 // Struct to build service watcher which looks after target services.
 type ServiceWatcher struct {
-	Context
+	context.Context
+	clientset kubernetes.Clientset
 	log       *logrus.Entry
 	svcFilter labels.Selector
-	informer  cache.SharedInformer
+	Informer  cache.SharedInformer
 	// Name space to run watcher & mirror services.
 	namespace string
 }
 
 // Build new service watcher
-func NewServiceWatcher(ctx Context, log *logrus.Logger, ns *string) ServiceWatcher {
+func NewServiceWatcher(ctx context.Context, client *kubernetes.Clientset, log *logrus.Logger, ns *string) ServiceWatcher {
 	svc := &ServiceWatcher{
-		Context: ctx,
+		Context:   ctx,
+		clientset: *client,
 		//Add Field to logger to distinquish between each other
 		log: log.WithField("[logger]", "service"),
 	}
 	svc.svcFilter = svc.createServiceFilter()
-	svc.informer = svc.createSharedInformer()
+	svc.Informer = svc.createSharedInformer()
 	svc.namespace = *ns
 	return *svc
 }
@@ -44,7 +49,7 @@ func (svc *ServiceWatcher) checkNameSpaceExists() {
 
 	// Check if the namespace already exists
 	namespace := svc.namespace
-	_, err := svc.Clientset.CoreV1().Namespaces().Get(svc.Context, namespace, metav1.GetOptions{})
+	_, err := svc.clientset.CoreV1().Namespaces().Get(svc.Context, namespace, metav1.GetOptions{})
 	if err != nil {
 		if apiError.IsAlreadyExists(err) {
 			svc.log.Debugf("Skipped creating namespace '%v'; already exists", namespace)
@@ -59,7 +64,7 @@ func (svc *ServiceWatcher) checkNameSpaceExists() {
 			Name: namespace,
 		},
 	}
-	_, err = svc.Clientset.CoreV1().Namespaces().Create(svc.Context, newNamespace, metav1.CreateOptions{})
+	_, err = svc.clientset.CoreV1().Namespaces().Create(svc.Context, newNamespace, metav1.CreateOptions{})
 	if err != nil {
 		svc.log.Errorf("Issue creating namespace: %v", err)
 	}
@@ -96,10 +101,10 @@ func (svc *ServiceWatcher) createSharedInformer() cache.SharedInformer {
 	informer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return svc.Clientset.CoreV1().Services("").List(svc.Context, metav1.ListOptions{LabelSelector: svcFilter.String()})
+				return svc.clientset.CoreV1().Services("").List(svc.Context, metav1.ListOptions{LabelSelector: svcFilter.String()})
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return svc.Clientset.CoreV1().Services("").Watch(svc.Context, metav1.ListOptions{LabelSelector: svcFilter.String()})
+				return svc.clientset.CoreV1().Services("").Watch(svc.Context, metav1.ListOptions{LabelSelector: svcFilter.String()})
 			},
 		},
 		&corev1.Service{},
@@ -186,7 +191,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
 	svc.log.Infof("Checking global Svc Named= %v  if exists", globalSvcName)
-	globalSvc, err := svc.Clientset.CoreV1().Services(svc.namespace).Get(svc.Context, globalSvcName, metav1.GetOptions{})
+	globalSvc, err := svc.clientset.CoreV1().Services(svc.namespace).Get(svc.Context, globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
 	if err != nil && !apiError.IsAlreadyExists(err) {
@@ -217,7 +222,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 		}
 		//Create clientSet to create Service,
 		defaultCreateOptions := metav1.CreateOptions{}
-		_, err := svc.Clientset.CoreV1().Services(svc.namespace).Create(svc.Context, globalService, defaultCreateOptions)
+		_, err := svc.clientset.CoreV1().Services(svc.namespace).Create(svc.Context, globalService, defaultCreateOptions)
 		if !apiError.IsAlreadyExists(err) && err != nil {
 			svc.log.Errorf("Issue with service creation, Name=%v", globalSvcName)
 			svc.log.Error(err)
@@ -233,7 +238,7 @@ func (svc *ServiceWatcher) handleServiceAdd(obj interface{}) {
 			// Update all the ports, cause its addition.
 			globalSvc.Spec.Ports = globalSvcPort
 			defaultCreateOptions := metav1.CreateOptions{}
-			_, err := svc.Clientset.CoreV1().Services(svc.namespace).Update(svc.Context, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
+			_, err := svc.clientset.CoreV1().Services(svc.namespace).Update(svc.Context, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 			if err != nil {
 				svc.log.Errorf("Unable to update ports, for global service Name=%v", globalSvcName)
 				svc.log.Error(err)
@@ -280,7 +285,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 
 		svc.log.Debugf("Checking global Svc Named=%v if exists", globalSvcName)
 
-		globalSvc, err := svc.Clientset.CoreV1().Services("default").Get(svc.Context, globalSvcName, metav1.GetOptions{})
+		globalSvc, err := svc.clientset.CoreV1().Services("default").Get(svc.Context, globalSvcName, metav1.GetOptions{})
 
 		if !apiError.IsAlreadyExists(err) && err != nil {
 			svc.log.Errorf("Issue in retrieving global svc Name=%v", globalSvcName)
@@ -296,7 +301,7 @@ func (svc *ServiceWatcher) handleServiceUpdate(oldObj, newObj interface{}) {
 			defaultCreateOptions := metav1.CreateOptions{}
 			//Again make sure there is change in ports and its different from new service.
 			svc.log.Debugf("Updating Global service, Ports to update=%v, existing ports=%v", globalSvcPort, globalSvc.Spec.Ports)
-			_, err := svc.Clientset.CoreV1().Services(svc.namespace).Update(svc.Context, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
+			_, err := svc.clientset.CoreV1().Services(svc.namespace).Update(svc.Context, globalSvc, metav1.UpdateOptions(defaultCreateOptions))
 			if err != nil {
 				svc.log.Errorf("Unable to update ports, for global service, Name=%v", globalSvcName)
 				svc.log.Error(err)
@@ -318,7 +323,7 @@ func (svc *ServiceWatcher) handleServiceDelete(obj interface{}) {
 	}
 
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
-	_, err := svc.Clientset.CoreV1().Services("").List(svc.Context, metav1.ListOptions{LabelSelector: targetClusterame})
+	_, err := svc.clientset.CoreV1().Services("").List(svc.Context, metav1.ListOptions{LabelSelector: targetClusterame})
 	if err != nil {
 		svc.log.Errorf("Unable to list services  for label: %v", targetClusterame)
 		svc.log.Error(err)

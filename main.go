@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	ctx "context"
 	"flag"
 	"os"
 	"path/filepath"
 
+	globalMirrorWatcher "github.com/rushi47/service-mirror-prototype/watcher"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -17,14 +17,15 @@ import (
 // Make sure all global services lies in only one namespace.
 const GLOBAL_SVC_NAMESPACE = "default"
 
+// Create context
 type Context struct {
-	ctx.Context
+	context.Context
 	kubernetes.Clientset
 }
 
 type Watcher struct {
 	//Various informers like Service, EndpointSlice.
-	informers []cache.SharedInformer
+	Informers []cache.SharedInformer
 }
 
 func main() {
@@ -66,28 +67,23 @@ func main() {
 		log.Panicf("Issue in building client from config: %v", err)
 	}
 
-	//Create context
-	ctx := &Context{
-		context.TODO(),
-		*client,
-	}
-
 	//Make sure it runs in loop.
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	svcWatcher := NewServiceWatcher(*ctx, log, globalSvcNs)
-
 	watcher := &Watcher{}
-	watcher.informers = append(watcher.informers, svcWatcher.informer)
+	//Return the service watcher
+	svcWatcher := globalMirrorWatcher.NewServiceWatcher(context.Background(), client, log, globalSvcNs)
+
+	watcher.Informers = append(watcher.Informers, svcWatcher.Informer)
 
 	//Run all the informers
-	for _, informer := range watcher.informers {
+	for _, informer := range watcher.Informers {
 		go informer.Run(stopCh)
 	}
 
 	//Make sure cache is synced.
-	for _, informer := range watcher.informers {
+	for _, informer := range watcher.Informers {
 		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
 			log.Panicln("Failed to sync informer cache")
 		}
