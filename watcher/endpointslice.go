@@ -13,7 +13,7 @@ import (
 // Handle add events
 func (eps *Watcher) handleEpsAdd(endpointslice discoveryv1.EndpointSlice) {
 
-	eps.log.Infof("EndpointSlice has been appeared : %v", endpointslice.Name)
+	eps.log.Debugf("EndpointSlice has been appeared : %v", endpointslice.Name)
 	// TO DO : Make sure it checks if global svc exists or not for this endpoint
 	eps.log.Debug("Global Service Exists for this Endpoint.")
 
@@ -57,6 +57,13 @@ func (eps *Watcher) handleEpsAdd(endpointslice discoveryv1.EndpointSlice) {
 		targetEndpoints := endpointslice.Endpoints
 		endpointSliceGlobal := make([]discoveryv1.Endpoint, 0)
 		for _, ep := range targetEndpoints {
+			// Linkerd takes time after updating port in target cluster, in this time target svc might receive gateway ip.
+			// Handle this condition
+			if ep.Hostname == nil {
+				eps.log.Errorf("Skipping the update as Hostname is not present, mirror service is likley to have gone in weird state")
+				eps.log.Errorf("Check Endpointslice: %v look it has gateway ip, which it shouldn't have", endpointslice.Name)
+				return
+			}
 			//Add clustername to the hostname
 			hostname := fmt.Sprintf("%v-%v", *ep.Hostname, targetClusterName)
 			ep.Hostname = &hostname
@@ -106,6 +113,14 @@ func (eps *Watcher) handleEpsUpdate(oldEndpoint, newEndpoint discoveryv1.Endpoin
 		targetEndpoints := newEndpoint.DeepCopy().Endpoints
 		targetClusterName := newEndpoint.GetLabels()["mirror.linkerd.io/cluster-name"]
 		for _, addr := range targetEndpoints {
+			// Linkerd takes time after updating port in target cluster, in this time target svc might receive in gateway ip.
+			// Handle this condition
+			if addr.Hostname == nil {
+				eps.log.Errorf("Skipping the update as Hostname is not present, mirror service is likley to have gone in weird state")
+				eps.log.Errorf("Check Endpointslice: %v. Probably it has gateway ip, which it shouldn't have", newEndpoint.Name)
+				eps.log.Errorf("It might recover automatically")
+				return
+			}
 			hostname := fmt.Sprintf("%v-%v", *addr.Hostname, targetClusterName)
 			addr.Hostname = &hostname
 			newEpAddresses = append(newEpAddresses, addr)

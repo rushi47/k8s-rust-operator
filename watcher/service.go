@@ -33,6 +33,7 @@ func (svc *Watcher) checkNameSpaceExists() {
 	_, err = svc.clientset.CoreV1().Namespaces().Create(svc.Context, newNamespace, metav1.CreateOptions{})
 	if err != nil {
 		svc.log.Errorf("Issue creating namespace: %v", err)
+		return
 	}
 
 	svc.log.Infof("Namespace '%s' created", namespace)
@@ -93,7 +94,7 @@ func (svc *Watcher) handleServiceAdd(service corev1.Service) {
 
 	*/
 
-	svc.log.Infof("New Target Service Added, svcName= %v", service.Name)
+	svc.log.Debugf("New Target Service Added, svcName= %v", service.Name)
 
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
 
@@ -104,7 +105,7 @@ func (svc *Watcher) handleServiceAdd(service corev1.Service) {
 	// TO DO: Add global object in local cache.
 	globalSvcName := strings.Split(targetSvc.Name, fmt.Sprintf("-%s", targetClusterame))[0]
 	globalSvcName = globalSvcName + "-global"
-	svc.log.Infof("Checking global Svc Named= %v  if exists", globalSvcName)
+	svc.log.Debugf("Checking global Svc Named= %v  if exists", globalSvcName)
 	globalSvc, err := svc.clientset.CoreV1().Services(svc.namespace).Get(svc.Context, globalSvcName, metav1.GetOptions{})
 
 	//If global service doesnt exist cerate it
@@ -146,7 +147,7 @@ func (svc *Watcher) handleServiceAdd(service corev1.Service) {
 	} else {
 		// If service already exists, check if the port from the target service are inside global svc.
 		svc.log.Debugf("Skipping Creation of New Global Service, Named=%v already exists", globalSvcName)
-		svc.log.Infof("Checking if the Spec is synced. [Currently only checks for ports.]")
+		svc.log.Debugf("Checking if the Spec is synced. [Currently only checks for ports.]")
 		globalSvcPort, diff := svc.checkParityofService(targetSvc, globalSvc)
 		if diff {
 			// Update all the ports, cause its addition.
@@ -158,11 +159,11 @@ func (svc *Watcher) handleServiceAdd(service corev1.Service) {
 				svc.log.Error(err)
 				return
 			}
+			svc.log.Infof("Updated global service port: %v", globalSvc.Name)
 		}
 
 	}
 
-	svc.log.Infof("Global Service with Name=%v  should exist.", globalSvcName)
 }
 
 // Function to handle service updates

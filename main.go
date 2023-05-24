@@ -20,7 +20,7 @@ func main() {
 	// Set up logger .
 	log := &logrus.Logger{
 		Out:   os.Stderr,
-		Level: logrus.DebugLevel,
+		Level: logrus.InfoLevel,
 		Formatter: &logrus.TextFormatter{
 			TimestampFormat: "2006-01-02 15:04:05",
 			ForceColors:     true,
