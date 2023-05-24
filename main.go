@@ -9,7 +9,6 @@ import (
 	globalMirrorWatcher "github.com/rushi47/service-mirror-prototype/watcher"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 	client "k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
@@ -17,22 +16,11 @@ import (
 // Make sure all global services lies in only one namespace.
 const GLOBAL_SVC_NAMESPACE = "default"
 
-// Create context
-type Context struct {
-	context.Context
-	kubernetes.Clientset
-}
-
-type Watcher struct {
-	//Various informers like Service, EndpointSlice.
-	Informers []cache.SharedInformer
-}
-
 func main() {
 	// Set up logger .
 	log := &logrus.Logger{
 		Out:   os.Stderr,
-		Level: logrus.DebugLevel,
+		Level: logrus.InfoLevel,
 		Formatter: &logrus.TextFormatter{
 			TimestampFormat: "2006-01-02 15:04:05",
 			ForceColors:     true,
@@ -51,7 +39,7 @@ func main() {
 	}
 
 	//Specify the NameSpace for install controller & global svc.
-	globalSvcNs := flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
+	globalSvcNamespace := flag.String("globalsvc-ns", GLOBAL_SVC_NAMESPACE, "(optional) Namespace to install service mirror controller and global mirror services.")
 
 	flag.Parse()
 
@@ -71,23 +59,12 @@ func main() {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	watcher := &Watcher{}
-	//Return the service watcher
-	svcWatcher := globalMirrorWatcher.NewServiceWatcher(context.Background(), client, log, globalSvcNs)
+	watcher := globalMirrorWatcher.NewWatch(context.Background(), *client, log, *globalSvcNamespace)
 
-	watcher.Informers = append(watcher.Informers, svcWatcher.Informer)
+	watcher.RegisterHandlers()
 
-	//Run all the informers
-	for _, informer := range watcher.Informers {
-		go informer.Run(stopCh)
-	}
+	watcher.Run(stopCh)
 
-	//Make sure cache is synced.
-	for _, informer := range watcher.Informers {
-		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
-			log.Panicln("Failed to sync informer cache")
-		}
-	}
 	// Run the program indefinitely
 	<-stopCh
 }
