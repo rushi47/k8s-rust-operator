@@ -147,7 +147,7 @@ func (epsW *Watcher) handleEpsUpdate(oldEndpoint, newEndpoint discoveryv1.Endpoi
 // Handle endpoitslice delete, delete respective global endpointslice.
 func (epsW *Watcher) handleEpsDelete(endpointslice discoveryv1.EndpointSlice) {
 
-	epsW.log.Info("Got the the delete for Endpointslice: %v", endpointslice.Name)
+	epsW.log.Infof("Got the the delete for Endpointslice: %v", endpointslice.Name)
 
 	targetSvcName := endpointslice.GetLabels()["kubernetes.io/service-name"]
 
@@ -167,4 +167,35 @@ func (epsW *Watcher) handleEpsDelete(endpointslice discoveryv1.EndpointSlice) {
 	}
 
 	epsW.log.Infof("Global Endpointslice deleted: %v, respective to: %v", globalEp.Name, endpointslice.Name)
+
+	// DELETE RESPECTIVE GLOBAL SERVICE IF THERE ARE NO MORE ENDPOINTSLICES.....
+
+	//Get global service name
+	globalSvcName := globalEp.GetLabels()["kubernetes.io/service-name"]
+	epsW.log.Debugf("If there are no more endpointslices exist for Global Service: %v else global service will be deleted", globalSvcName)
+
+	//Find if there endpointslices exists for this global service if not remove its
+	epsList, err := epsW.clientset.DiscoveryV1().EndpointSlices(epsW.namespace).List(epsW.Context, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%v", globalSvcName),
+	})
+
+	if err != nil {
+		epsW.log.Errorf("Unable to get endpoinslices wrt to global service: %v, err: %v", globalSvcName, err)
+		return
+	}
+
+	if len(epsList.Items) > 0 {
+		epsW.log.Debugf("Passing deletion of respetive global service as other endpointslices exist: %v", globalSvcName)
+		return
+	}
+
+	//It means no endpointslices exists for respective global service so it can be deleted.
+	err = epsW.clientset.CoreV1().Services(epsW.namespace).Delete(epsW.Context, globalSvcName, metav1.DeleteOptions{})
+	if err != nil {
+		epsW.log.Errorf("Issue deleting globals service name: %v", globalSvcName)
+		epsW.log.Error(err)
+		return
+	}
+
+	epsW.log.Info("Global service: %v is also deleted as there are no more endpoinslices attached to it.", globalSvcName)
 }

@@ -211,15 +211,13 @@ func (svcW *Watcher) handleServiceUpdate(oldService corev1.Service, newService c
 }
 
 func (svcW *Watcher) handleServiceDelete(service corev1.Service) {
+	// Remove respective global service if there are not endpointslices attached to it
 
 	targetClusterame := service.GetLabels()["mirror.linkerd.io/cluster-name"]
-	_, err := svcW.clientset.CoreV1().Services("").List(svcW.Context, metav1.ListOptions{LabelSelector: targetClusterame})
-	if err != nil {
-		svcW.log.Errorf("Unable to list services  for label: %v", targetClusterame)
-		svcW.log.Error(err)
-		return
-	}
+	globalSvcName := strings.Split(service.Name, fmt.Sprintf("-%s", targetClusterame))[0]
+	globalSvcName = globalSvcName + "-global"
 
-	//TO DO : Make sure if all the services are deleted for cluster, global service is also deleted.
-	svcW.log.Infof("Service being Deleted Name=%v ", service.Name)
+	svcW.log.Infof("Service being deleted: %v", service.Name)
+
+	svcW.log.Infof("Global service: %v will also be deleted. If there are no more endpointslices attached to global service", globalSvcName)
 }
