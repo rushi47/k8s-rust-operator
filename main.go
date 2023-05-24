@@ -9,18 +9,12 @@ import (
 	globalMirrorWatcher "github.com/rushi47/service-mirror-prototype/watcher"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 	client "k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
 
 // Make sure all global services lies in only one namespace.
 const GLOBAL_SVC_NAMESPACE = "default"
-
-type Watcher struct {
-	//Various informers like Service, EndpointSlice.
-	Informers []cache.SharedInformer
-}
 
 func main() {
 	// Set up logger .
@@ -65,29 +59,12 @@ func main() {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	watcher := &Watcher{}
-	ctx := context.Background()
-	// Get the service watcher
-	svcWatcher := globalMirrorWatcher.NewServiceWatcher(ctx, client, log, globalSvcNamespace)
+	watcher := globalMirrorWatcher.NewWatch(context.Background(), *client, log, *globalSvcNamespace)
 
-	// Get the endpointslice watcher
-	epsWatcher := globalMirrorWatcher.NewEndpointSlicesWatcher(ctx, client, log, globalSvcNamespace)
+	watcher.RegisterHandlers()
 
-	//Add all the watcher
-	watcher.Informers = append(watcher.Informers, svcWatcher.Informer, epsWatcher.Informer)
+	watcher.Run(stopCh)
 
-	//Run all the informers
-	for _, informer := range watcher.Informers {
-		go informer.Run(stopCh)
-	}
-
-	log.Info("Checking informer cache....")
-	//Make sure cache is synced.
-	for _, informer := range watcher.Informers {
-		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
-			log.Error("Failed to sync informer cache")
-		}
-	}
 	// Run the program indefinitely
 	<-stopCh
 }
