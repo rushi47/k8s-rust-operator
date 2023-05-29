@@ -161,8 +161,13 @@ delete-testset:
    cat bootstrap-scripts/dns-utils.yaml | kubectl --context=k3d-source delete -f -
 
 #Set kubectl context to source
+#And inject linkerd inside po
 set-context:
    kubectl config use-context k3d-source
+
+   sleep 10
+
+   kubectl get deployment dnsutils -o yaml | linkerd inject - | kubectl apply -f -
 
 #Delete all three clusters.
 k3d-delete:

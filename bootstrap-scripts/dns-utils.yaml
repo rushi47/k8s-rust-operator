@@ -1,14 +1,23 @@
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: dnsutils
   namespace: default
 spec:
-  containers:
-  - name: dnsutils
-    image: praqma/network-multitool
-    command:
-      - sleep
-      - "infinity"
-    imagePullPolicy: IfNotPresent
-  restartPolicy: Always
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dnsutils
+  template:
+    metadata:
+      labels:
+        app: dnsutils
+    spec:
+      containers:
+      - name: dnsutils
+        image: praqma/network-multitool
+        command:
+          - sleep
+          - "infinity"
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
