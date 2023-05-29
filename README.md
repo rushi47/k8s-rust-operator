@@ -1,4 +1,4 @@
-### Kubernetes operator for service mirroring
+### Kubernetes operator for service mirroring - [WIP]
 ---
 
 This operator has been written to prototype the aggregation layer for [Service Mirror](https://linkerd.io/2020/02/25/multicluster-kubernetes-with-service-mirroring/). 
