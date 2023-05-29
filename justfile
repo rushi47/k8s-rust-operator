@@ -123,6 +123,8 @@ link-mc: && install-testset
       # Grab the LB IP of clusters API server & replace it in the secret blob:
       lb_ip=$(kubectl --context="$cluster" get svc -n kube-system traefik -o json | jq -r '.status.loadBalancer.ingress[0].ip')
       
+      sleep 5
+      
       # shellcheck disable=SC2001  
       echo "$($LINKERD --context="$cluster" \
                multicluster link --set "enableHeadlessServices=true" \
