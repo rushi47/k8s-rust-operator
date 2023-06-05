@@ -1,4 +1,4 @@
-FROM golang:1.17
+FROM golang:1.20
 
 WORKDIR /app
 
@@ -6,5 +6,5 @@ COPY . .
 
 RUN go mod download 
 
-# Run the tests
-ENTRYPOINT go test tests/*
+# Keep it running
+CMD tail -f /dev/null
