@@ -20,7 +20,7 @@ import (
 const (
 	TEST_GLOBAL_SVC_NAME = "echo-test-svc-global"
 	TEST_NS              = "default"
-	TEST_RETRIES         = 5
+	MAX_RETRIES          = 5
 )
 
 func GetEndpintSlices() {
@@ -43,16 +43,15 @@ func GetEndpintSlices() {
 }
 
 func TestGlobalService(t *testing.T) {
-	t.Logf("Testing if Service: %v is created", TEST_GLOBAL_SVC_NAME)
 
 	// Make request && make sure we get response from both cluster in X retries.
 	// Add retrieved responses inside map of string and make sure length is 2.
 	cluster := make(map[string]string)
-	tries := 0
-	for tries < TEST_RETRIES {
-		tries += 1
-		// Try service for couple of times
-		url := fmt.Sprintf("http://%v.%v", TEST_GLOBAL_SVC_NAME, TEST_NS)
+
+	// Try service for couple of times
+	url := fmt.Sprintf("http://%v.%v", TEST_GLOBAL_SVC_NAME, TEST_NS)
+
+	for attempt := 0; attempt < MAX_RETRIES; attempt++ {
 
 		resp, err := http.Get(url)
 
@@ -78,8 +77,6 @@ func TestGlobalService(t *testing.T) {
 }
 
 func TestIndividualCluster(t *testing.T) {
-
-	t.Logf("Test specifc cluster, target1 & target2")
 
 	t.Run("Test Endpoint for Target1", func(t *testing.T) {
 		// echo-test-0-k3d-target1.echo-test-svc-global/echo
