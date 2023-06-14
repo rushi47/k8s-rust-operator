@@ -197,5 +197,5 @@ func (epsW *Watcher) handleEpsDelete(endpointslice discoveryv1.EndpointSlice) {
 		return
 	}
 
-	epsW.log.Infof("Global service: %v is also deleted as there are no more endpoinslices attached to it.", globalSvcName)
+	epsW.log.Infof("Global service: %v is also deleted as there are no more endpoinslices attached to it", globalSvcName)
 }
