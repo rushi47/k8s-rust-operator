@@ -1,20 +1,13 @@
 package main
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	client "k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 )
 
 const (
@@ -22,25 +15,6 @@ const (
 	TEST_NS              = "default"
 	MAX_RETRIES          = 5
 )
-
-func GetEndpintSlices() {
-	var kubeconfig *string
-	if home := homedir.HomeDir(); home != "" {
-		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	}
-
-	//use the current context in kubeconfig
-	config, err := client.BuildConfigFromFlags("", *kubeconfig)
-
-	fmt.Errorf(err.Error())
-	//Make sure config is not nil
-
-	client, err := kubernetes.NewForConfig(config)
-
-	//Make sure global-svc is created.
-	_, err = client.CoreV1().Services(TEST_NS).Get(context.Background(), TEST_GLOBAL_SVC_NAME, metav1.GetOptions{})
-
-}
 
 func TestGlobalService(t *testing.T) {
 
