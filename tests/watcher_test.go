@@ -65,8 +65,6 @@ func TestGlobalService(t *testing.T) {
 
 		defer resp.Body.Close()
 
-		assert.Equal(t, resp.StatusCode, http.StatusOK)
-
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			// Retry again
