@@ -144,10 +144,12 @@ link-mc: && install-testset
    fetch_credentials k3d-source | kubectl --context=k3d-target2 apply -n linkerd-multicluster -f -
 
    sleep 10
-   # Fails on mac so commented for now
-   # for c in k3d-source k3d-target1 ; do
-   #    $LINKERD --context="$c" mc check
-   # done
+   # multicluster check fails on mac so skip for now
+   if [ `uname` != "Darwin" ]; then
+      for c in k3d-source k3d-target1 ; do
+         $LINKERD --context="$c" mc check
+      done
+   fi   
 
 #Install 2 statefulset in target1 & target2 multicluster & dnsutil for testing in source
 install-testset: && set-context
